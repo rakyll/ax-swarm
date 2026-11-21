@@ -31,7 +31,7 @@ To run against a real AX cluster (`ax local` or GKE), drop `--ax=mock` (defaults
 
 ```bash
 # Example for ax local (Kind)
-ax-swarm serve --ax=cli --addr 0.0.0.0:8787 --swarm-url http://host.docker.internal:8787
+ax-swarm serve --ax=cli --addr 0.0.0.0:8788 --swarm-url http://host.docker.internal:8788
 ```
 
 Inside an AX Task container, install and run the worker entrypoint:

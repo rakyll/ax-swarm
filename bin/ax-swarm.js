@@ -12,7 +12,7 @@ import { createSwarmServer } from "../src/server.js";
 import { FileStore } from "../src/store.js";
 
 function defaultServerUrl() {
-  return process.env.SWARM_API_URL || "http://127.0.0.1:8787";
+  return process.env.SWARM_API_URL || "http://127.0.0.1:8788";
 }
 
 function defaultDataDir() {
@@ -23,7 +23,7 @@ function usage() {
   console.error(`ax-swarm — external swarm coordinator & wake-on-@mention control plane for AX
 
 Usage:
-  ax-swarm serve   [--addr 127.0.0.1:8787] [--data-dir ~/.ax-swarm/data] [--ax cli|mock] [--suspend-grace 15000]
+  ax-swarm serve   [--addr 127.0.0.1:8788] [--data-dir ~/.ax-swarm/data] [--ax cli|mock] [--suspend-grace 15000]
   ax-swarm create  <swarm-id> [--title "..."] [--atespace swarm-<id>] [--workspace <ws>]
   ax-swarm title   <swarm-id> <title...>
   ax-swarm add     <swarm-id> <name> --brief "..." [--workspace <ws>] [--runtime <rt>] [--model <m>] [--image <img>]
@@ -46,7 +46,7 @@ async function cmdServe(args) {
   const { values } = parseArgs({
     args,
     options: {
-      addr: { type: "string", default: "127.0.0.1:8787" },
+      addr: { type: "string", default: "127.0.0.1:8788" },
       "data-dir": { type: "string", default: defaultDataDir() },
       ax: { type: "string", default: "cli" },
       "ax-bin": { type: "string", default: "ax" },
