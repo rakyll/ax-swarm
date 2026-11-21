@@ -1,7 +1,10 @@
 ADDR ?= 127.0.0.1:8788
 AX ?= cli
 
-.PHONY: dev
+.PHONY: dev install
 
 dev:
 	node bin/ax-swarm.js serve --addr $(ADDR) --ax $(AX)
+
+install:
+	npm install -g .

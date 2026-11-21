@@ -45,32 +45,24 @@ ax-swarm-worker
 
 `ax-swarm` implements Antigravity's `swarm_board` remote-board viewer contract (`swarm --json --watch` and `--roster-only`).
 
-### 1. Register the `ax-swarm` backend
+### 1. Enable the built-in Swarm plugin
 
-Write `remote_board.json` into Antigravity's `swarm_board` sidecar directory:
+In Antigravity, open **Customizations → Plugins** and ensure the built-in **Swarm** (`swarm`) plugin is enabled. This provides the **Swarm** side pane (`swarm_board` sidecar).
+
+### 2. Register the `ax-swarm` backend
+
+From your terminal, write `remote_board.json` into Antigravity's built-in `swarm_board` sidecar directory (run this directly in a shell, since agents cannot write under `~/.gemini/antigravity/builtin/`):
 
 ```bash
 ax-swarm remote-board \
   --out ~/.gemini/antigravity/builtin/plugins/swarm/sidecars/swarm_board/remote_board.json
 ```
 
-(You can also print it to stdout with `ax-swarm remote-board` or override the binary path via `AX_SWARM_CLI`.)
-
-### 2. Anchor a conversation to a swarm
-
-Create `swarm.json` in the conversation's swarm directory (`~/.gemini/antigravity/brain/<conversation-id>/.system_generated/swarm/swarm.json`):
-
-```json
-{
-  "backend": "ax-swarm",
-  "swarm_id": "sw1",
-  "db": "swarm-sw1"
-}
-```
+(You can also print the config to stdout with `ax-swarm remote-board`, or override the CLI path at runtime via `AX_SWARM_CLI`. If the Swarm plugin was already running, toggle it off and back on in **Customizations → Plugins** so `swarm_board` picks up `remote_board.json` on startup.)
 
 ### 3. Open the Swarm pane
 
-Open the Swarm Board pane in Antigravity for that conversation. The sidecar automatically runs:
+Open the **Swarm** side pane in Antigravity for a conversation attached to an `ax-swarm` swarm. The sidecar automatically runs:
 
 ```bash
 ax-swarm swarm --json --watch --db swarm-sw1 sw1
