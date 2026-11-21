@@ -42,25 +42,40 @@ ax-swarm-worker
 
 ## Antigravity Swarm Board Integration
 
-`ax-swarm` implements Antigravity's `swarm_board` remote-board viewer contract:
+`ax-swarm` implements Antigravity's `swarm_board` remote-board viewer contract (`swarm --json --watch` and `--roster-only`).
+
+### 1. Register the `ax-swarm` backend
+
+Write `remote_board.json` into Antigravity's `swarm_board` sidecar directory:
 
 ```bash
-# Stream NDJSON snapshots (exits cleanly on stdin EOF)
-ax-swarm swarm --json --watch sw1
-
-# One-shot roster lookup
-ax-swarm swarm --json --roster-only sw1
+ax-swarm remote-board \
+  --out ~/.gemini/antigravity/builtin/plugins/swarm/sidecars/swarm_board/remote_board.json
 ```
 
-Generate `remote_board.json` for `swarm_board`:
+(You can also print it to stdout with `ax-swarm remote-board` or override the binary path via `AX_SWARM_CLI`.)
+
+### 2. Anchor a conversation to a swarm
+
+Create `swarm.json` in the conversation's swarm directory (`~/.gemini/antigravity/brain/<conversation-id>/.system_generated/swarm/swarm.json`):
+
+```json
+{
+  "backend": "ax-swarm",
+  "swarm_id": "sw1",
+  "db": "swarm-sw1"
+}
+```
+
+### 3. Open the Swarm pane
+
+Open the Swarm Board pane in Antigravity for that conversation. The sidecar automatically runs:
 
 ```bash
-# Print to stdout
-ax-swarm remote-board
-
-# Or write directly to a file
-ax-swarm remote-board --out /path/to/swarm_board/remote_board.json
+ax-swarm swarm --json --watch --db swarm-sw1 sw1
 ```
+
+and streams live member status, phases, and board messages. (It also uses `ax-swarm swarm --json --roster-only` for roster lookup and exits cleanly when the pane closes.)
 
 ## Testing
 
