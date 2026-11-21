@@ -1,19 +1,18 @@
+// @ts-check
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
-import type { IncomingMessage, ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { test } from "node:test";
-import { MockAXClient } from "../src/axclient.ts";
-import { DesiredState, Phase } from "../src/model.ts";
-import type { WatchSnapshot } from "../src/model.ts";
-import { Reconciler } from "../src/reconciler.ts";
-import { createSwarmHandler } from "../src/server.ts";
-import { FileStore } from "../src/store.ts";
+import { MockAXClient } from "../src/axclient.js";
+import { DesiredState, Phase } from "../src/model.js";
+import { Reconciler } from "../src/reconciler.js";
+import { createSwarmHandler } from "../src/server.js";
+import { FileStore } from "../src/store.js";
 
-function makeTempDir(): string {
+function makeTempDir() {
   return mkdtempSync(join(tmpdir(), "ax-swarm-test-"));
 }
 
@@ -50,14 +49,13 @@ test("FileStore: wake-on-@mention, park race protection, reload, and watch", () 
     assert.equal(post2.message.seq, 2);
     assert.deepEqual(post2.woken, ["parser-1"]);
 
-    // Parking with stale since=1 is blocked and returns unread #2.
     const park2 = st.parkMember({ swarm_id: "sw1", name: "parser-1", since: 1 });
     assert.equal(park2.park_blocked, true);
     assert.equal(park2.unread?.length, 1);
     assert.equal(park2.unread?.[0].seq, 2);
 
-    // Watch emits full snapshot then delta.
-    const snaps: WatchSnapshot[] = [];
+    /** @type {any[]} */
+    const snaps = [];
     const unsub = st.watch("sw1", (s) => snaps.push(s));
     st.postMessage({ swarm_id: "sw1", agent: "coordinator", text: "@all status check" });
     unsub();
@@ -66,10 +64,8 @@ test("FileStore: wake-on-@mention, park race protection, reload, and watch", () 
     assert.equal(snaps[1].head, 3);
     assert.equal(snaps[1].messages.length, 1);
 
-    // Reload from disk preserves tokens and messages.
     const st2 = new FileStore(dir);
-    const auth = st2.authenticateToken(token);
-    assert.deepEqual(auth, { swarm_id: "sw1", member_name: "parser-1" });
+    assert.deepEqual(st2.authenticateToken(token), { swarm_id: "sw1", member_name: "parser-1" });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -89,21 +85,17 @@ test("Reconciler: scale-to-zero AX Task lifecycle", async () => {
     st.createSwarm({ swarm_id: "sw1", workspace_ref: "golang" });
     st.addMember({ swarm_id: "sw1", name: "parser", brief: "Fix bugs", runtime: "claude-code" });
 
-    // 1. Add -> Create + Resume.
     await rec.reconcileOnce();
     assert.equal(mockAX.state("swarm-sw1", "parser"), "Working");
 
-    // 2. Park -> Suspend.
     st.parkMember({ swarm_id: "sw1", name: "parser", since: 1 });
     await rec.reconcileOnce();
     assert.equal(mockAX.state("swarm-sw1", "parser"), "Suspended");
 
-    // 3. @mention -> Resume.
     st.postMessage({ swarm_id: "sw1", agent: "verifier", text: "@parser fix lint" });
     await rec.reconcileOnce();
     assert.equal(mockAX.state("swarm-sw1", "parser"), "Working");
 
-    // 4. Kill -> Delete.
     st.killMember("sw1", "parser");
     await rec.reconcileOnce();
     assert.equal(mockAX.state("swarm-sw1", "parser"), undefined);
@@ -113,15 +105,16 @@ test("Reconciler: scale-to-zero AX Task lifecycle", async () => {
   }
 });
 
-async function invokeHandler(
-  handler: (req: IncomingMessage, res: ServerResponse) => Promise<void>,
-  method: string,
-  url: string,
-  body?: unknown,
-  headers: Record<string, string> = {},
-): Promise<{ status: number; json: unknown }> {
+/**
+ * @param {any} handler
+ * @param {string} method
+ * @param {string} url
+ * @param {unknown} [body]
+ * @param {Record<string, string>} [headers]
+ */
+async function invokeHandler(handler, method, url, body, headers = {}) {
   const payload = body !== undefined ? JSON.stringify(body) : "";
-  const req = Readable.from(payload ? [Buffer.from(payload)] : []) as unknown as IncomingMessage;
+  const req = /** @type {any} */ (Readable.from(payload ? [Buffer.from(payload)] : []));
   req.method = method;
   req.url = url;
   req.headers = headers;
@@ -130,20 +123,23 @@ async function invokeHandler(
   let out = "";
   const emitter = new EventEmitter();
   const res = Object.assign(emitter, {
-    writeHead(code: number) {
+    /** @param {number} code */
+    writeHead(code) {
       status = code;
       return this;
     },
-    write(chunk: string | Buffer) {
+    /** @param {string | Buffer} chunk */
+    write(chunk) {
       out += chunk.toString();
       return true;
     },
-    end(chunk?: string | Buffer) {
+    /** @param {string | Buffer} [chunk] */
+    end(chunk) {
       if (chunk) out += chunk.toString();
       emitter.emit("finish");
       return this;
     },
-  }) as unknown as ServerResponse;
+  });
 
   await handler(req, res);
   return { status, json: out ? JSON.parse(out) : null };
@@ -163,9 +159,8 @@ test("Server: HTTP API and Bearer token anti-spoofing", async () => {
       brief: "do work",
     });
     assert.equal(added.status, 201);
-    const token = (added.json as { token: string }).token;
+    const token = added.json.token;
 
-    // Worker tries to spoof agent="coordinator", server enforces "parser".
     const posted = await invokeHandler(
       handler,
       "POST",
@@ -174,7 +169,7 @@ test("Server: HTTP API and Bearer token anti-spoofing", async () => {
       { authorization: `Bearer ${token}` },
     );
     assert.equal(posted.status, 201);
-    assert.equal((posted.json as { message: { agent: string } }).message.agent, "parser");
+    assert.equal(posted.json.message.agent, "parser");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

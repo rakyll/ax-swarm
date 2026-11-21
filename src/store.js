@@ -1,3 +1,4 @@
+// @ts-check
 import { randomBytes } from "node:crypto";
 import {
   appendFileSync,
@@ -17,109 +18,48 @@ import {
   WakeMode,
   memberMatchesMessage,
   parseMentions,
-} from "./model.ts";
-import type {
-  Member,
-  Message,
-  Swarm,
-  WatchSnapshot,
-} from "./model.ts";
+} from "./model.js";
 
 export class StoreError extends Error {
-  readonly code: "NOT_FOUND" | "ALREADY_EXISTS" | "INVALID_ARG";
-
-  constructor(code: "NOT_FOUND" | "ALREADY_EXISTS" | "INVALID_ARG", message: string) {
+  /**
+   * @param {"NOT_FOUND" | "ALREADY_EXISTS" | "INVALID_ARG"} code
+   * @param {string} message
+   */
+  constructor(code, message) {
     super(message);
     this.code = code;
   }
 }
 
-export interface CreateSwarmParams {
-  swarm_id: string;
-  atespace?: string;
-  title?: string;
-  workspace_ref?: string;
-}
-
-export interface AddMemberParams {
-  swarm_id: string;
-  name: string;
-  role?: string;
-  model?: string;
-  runtime?: string;
-  image?: string;
-  workspace?: string;
-  brief?: string;
-  channels?: string[];
-  node_id?: string;
-  owner_kind?: OwnerKind;
-  owner_label?: string;
-  posted_by?: string;
-}
-
-export interface PostMessageParams {
-  swarm_id: string;
-  channel?: string;
-  agent: string;
-  text: string;
-}
-
-export interface ParkMemberParams {
-  swarm_id: string;
-  name: string;
-  since?: number;
-  wake_mode?: WakeMode;
-}
-
-export interface ParkResult {
-  member: Member;
-  park_blocked: boolean;
-  unread?: Message[];
-}
-
-interface TokenEntry {
-  swarm_id: string;
-  member_name: string;
-}
-
-interface Subscriber {
-  lastSeq: number;
-  onSnapshot: (snap: WatchSnapshot) => void;
-}
-
-interface SwarmData {
-  swarm: Swarm;
-  messages: Message[];
-  subs: Set<Subscriber>;
-}
-
-function writeAtomic(path: string, data: string, mode?: number): void {
+/**
+ * @param {string} path
+ * @param {string} data
+ * @param {number} [mode]
+ */
+function writeAtomic(path, data, mode) {
   const tmp = `${path}.tmp`;
   writeFileSync(tmp, data, { encoding: "utf8", mode });
   renameSync(tmp, path);
 }
 
-function cloneSwarm(sw: Swarm): Swarm {
-  return structuredClone(sw);
-}
-
 export class FileStore {
-  private readonly dir: string;
-  private readonly swarms = new Map<string, SwarmData>();
-  private readonly tokens = new Map<string, TokenEntry>();
-
-  constructor(dir: string) {
+  /** @param {string} dir */
+  constructor(dir) {
     this.dir = dir;
+    /** @type {Map<string, { swarm: any, messages: any[], subs: Set<{ lastSeq: number, onSnapshot: (snap: any) => void }> }>} */
+    this.swarms = new Map();
+    /** @type {Map<string, { swarm_id: string, member_name: string }>} */
+    this.tokens = new Map();
     mkdirSync(dir, { recursive: true });
     this.loadAll();
   }
 
-  private loadAll(): void {
+  loadAll() {
     const tokensPath = join(this.dir, "tokens.json");
     if (existsSync(tokensPath)) {
-      const raw = JSON.parse(readFileSync(tokensPath, "utf8")) as Record<string, TokenEntry>;
+      const raw = JSON.parse(readFileSync(tokensPath, "utf8"));
       for (const [k, v] of Object.entries(raw)) {
-        this.tokens.set(k, v);
+        this.tokens.set(k, /** @type {any} */ (v));
       }
     }
 
@@ -128,16 +68,17 @@ export class FileStore {
       const statePath = join(this.dir, entry.name, "state.json");
       if (!existsSync(statePath)) continue;
 
-      const swarm = JSON.parse(readFileSync(statePath, "utf8")) as Swarm;
+      const swarm = JSON.parse(readFileSync(statePath, "utf8"));
       swarm.members ??= {};
 
       const boardPath = join(this.dir, entry.name, "board.jsonl");
-      const messages: Message[] = [];
+      /** @type {any[]} */
+      const messages = [];
       if (existsSync(boardPath)) {
         for (const line of readFileSync(boardPath, "utf8").split("\n")) {
           const trimmed = line.trim();
           if (!trimmed) continue;
-          messages.push(JSON.parse(trimmed) as Message);
+          messages.push(JSON.parse(trimmed));
         }
       }
       if (messages.length > 0 && messages[messages.length - 1].seq > swarm.head_seq) {
@@ -147,30 +88,37 @@ export class FileStore {
     }
   }
 
-  private saveSwarm(sw: Swarm): void {
+  /** @param {any} sw */
+  saveSwarm(sw) {
     const dir = join(this.dir, sw.swarm_id);
     mkdirSync(dir, { recursive: true });
     writeAtomic(join(dir, "state.json"), JSON.stringify(sw, null, 2));
   }
 
-  private appendMessage(swarmId: string, msg: Message): void {
+  /**
+   * @param {string} swarmId
+   * @param {any} msg
+   */
+  appendMessage(swarmId, msg) {
     const dir = join(this.dir, swarmId);
     mkdirSync(dir, { recursive: true });
     appendFileSync(join(dir, "board.jsonl"), `${JSON.stringify(msg)}\n`, "utf8");
   }
 
-  private saveTokens(): void {
-    const obj: Record<string, TokenEntry> = {};
+  saveTokens() {
+    /** @type {Record<string, any>} */
+    const obj = {};
     for (const [k, v] of this.tokens.entries()) {
       obj[k] = v;
     }
     writeAtomic(join(this.dir, "tokens.json"), JSON.stringify(obj, null, 2), 0o600);
   }
 
-  private notify(sd: SwarmData): void {
+  /** @param {{ swarm: any, messages: any[], subs: Set<{ lastSeq: number, onSnapshot: (snap: any) => void }> }} sd */
+  notify(sd) {
     for (const sub of sd.subs) {
       const delta = sd.messages.filter((m) => m.seq > sub.lastSeq);
-      const snap: WatchSnapshot = {
+      const snap = {
         version: 1,
         swarm_id: sd.swarm.swarm_id,
         title: sd.swarm.title,
@@ -185,13 +133,14 @@ export class FileStore {
     }
   }
 
-  createSwarm(p: CreateSwarmParams): Swarm {
+  /** @param {{ swarm_id: string, atespace?: string, title?: string, workspace_ref?: string }} p */
+  createSwarm(p) {
     if (!p.swarm_id) throw new StoreError("INVALID_ARG", "swarm_id is required");
     if (this.swarms.has(p.swarm_id)) {
       throw new StoreError("ALREADY_EXISTS", `swarm ${p.swarm_id} already exists`);
     }
     const now = new Date().toISOString();
-    const sw: Swarm = {
+    const sw = {
       swarm_id: p.swarm_id,
       atespace: p.atespace || `swarm-${p.swarm_id}`,
       title: p.title ?? "",
@@ -203,32 +152,38 @@ export class FileStore {
     };
     this.saveSwarm(sw);
     this.swarms.set(p.swarm_id, { swarm: sw, messages: [], subs: new Set() });
-    return cloneSwarm(sw);
+    return structuredClone(sw);
   }
 
-  getSwarm(swarmId: string): Swarm {
+  /** @param {string} swarmId */
+  getSwarm(swarmId) {
     const sd = this.swarms.get(swarmId);
     if (!sd) throw new StoreError("NOT_FOUND", `swarm ${swarmId} not found`);
-    return cloneSwarm(sd.swarm);
+    return structuredClone(sd.swarm);
   }
 
-  listSwarms(): Swarm[] {
+  listSwarms() {
     return [...this.swarms.values()]
-      .map((sd) => cloneSwarm(sd.swarm))
+      .map((sd) => structuredClone(sd.swarm))
       .sort((a, b) => a.created_at.localeCompare(b.created_at));
   }
 
-  setTitle(swarmId: string, title: string): Swarm {
+  /**
+   * @param {string} swarmId
+   * @param {string} title
+   */
+  setTitle(swarmId, title) {
     const sd = this.swarms.get(swarmId);
     if (!sd) throw new StoreError("NOT_FOUND", `swarm ${swarmId} not found`);
     sd.swarm.title = title;
     sd.swarm.updated_at = new Date().toISOString();
     this.saveSwarm(sd.swarm);
     this.notify(sd);
-    return cloneSwarm(sd.swarm);
+    return structuredClone(sd.swarm);
   }
 
-  addMember(p: AddMemberParams): { member: Member; token: string; brief_message?: Message } {
+  /** @param {any} p */
+  addMember(p) {
     if (!p.swarm_id || !p.name) {
       throw new StoreError("INVALID_ARG", "swarm_id and name are required");
     }
@@ -243,7 +198,7 @@ export class FileStore {
 
     const now = new Date().toISOString();
     const token = randomBytes(24).toString("hex");
-    let briefMsg: Message | undefined;
+    let briefMsg;
 
     if (p.brief?.trim()) {
       sd.swarm.head_seq += 1;
@@ -261,7 +216,7 @@ export class FileStore {
     }
 
     const startSeq = briefMsg ? briefMsg.seq - 1 : sd.swarm.head_seq;
-    const member: Member = {
+    const member = {
       name,
       task_name: name,
       conversation_id: `ax-swarm:${sd.swarm.atespace}:${name}`,
@@ -294,7 +249,11 @@ export class FileStore {
     return { member: structuredClone(member), token, brief_message: briefMsg };
   }
 
-  killMember(swarmId: string, rawName: string): Member {
+  /**
+   * @param {string} swarmId
+   * @param {string} rawName
+   */
+  killMember(swarmId, rawName) {
     const sd = this.swarms.get(swarmId);
     if (!sd) throw new StoreError("NOT_FOUND", `swarm ${swarmId} not found`);
     const name = rawName.toLowerCase();
@@ -312,7 +271,12 @@ export class FileStore {
     return structuredClone(m);
   }
 
-  updateMemberPhase(swarmId: string, rawName: string, phase: Phase): Member {
+  /**
+   * @param {string} swarmId
+   * @param {string} rawName
+   * @param {string} phase
+   */
+  updateMemberPhase(swarmId, rawName, phase) {
     const sd = this.swarms.get(swarmId);
     if (!sd) throw new StoreError("NOT_FOUND", `swarm ${swarmId} not found`);
     const name = rawName.toLowerCase();
@@ -329,11 +293,13 @@ export class FileStore {
     return structuredClone(m);
   }
 
-  authenticateToken(token: string): TokenEntry | undefined {
+  /** @param {string} token */
+  authenticateToken(token) {
     return this.tokens.get(token);
   }
 
-  postMessage(p: PostMessageParams): { message: Message; woken: string[] } {
+  /** @param {{ swarm_id: string, channel?: string, agent: string, text: string }} p */
+  postMessage(p) {
     if (!p.swarm_id || !p.agent || !p.text.trim()) {
       throw new StoreError("INVALID_ARG", "swarm_id, agent, and text are required");
     }
@@ -342,7 +308,7 @@ export class FileStore {
 
     const now = new Date().toISOString();
     sd.swarm.head_seq += 1;
-    const msg: Message = {
+    const msg = {
       seq: sd.swarm.head_seq,
       channel: p.channel || DEFAULT_CHANNEL,
       agent: p.agent.toLowerCase(),
@@ -352,7 +318,8 @@ export class FileStore {
     };
     sd.messages.push(msg);
 
-    const woken: string[] = [];
+    /** @type {string[]} */
+    const woken = [];
     for (const [name, m] of Object.entries(sd.swarm.members)) {
       if (memberMatchesMessage(m, msg)) {
         if (m.desired_state !== DesiredState.Running) {
@@ -372,12 +339,13 @@ export class FileStore {
     return { message: msg, woken };
   }
 
-  readBoard(
-    swarmId: string,
-    memberName = "",
-    since = 0,
-    channel = "",
-  ): { head: number; messages: Message[] } {
+  /**
+   * @param {string} swarmId
+   * @param {string} [memberName]
+   * @param {number} [since]
+   * @param {string} [channel]
+   */
+  readBoard(swarmId, memberName = "", since = 0, channel = "") {
     const sd = this.swarms.get(swarmId);
     if (!sd) throw new StoreError("NOT_FOUND", `swarm ${swarmId} not found`);
 
@@ -398,7 +366,8 @@ export class FileStore {
     return { head: sd.swarm.head_seq, messages };
   }
 
-  parkMember(p: ParkMemberParams): ParkResult {
+  /** @param {{ swarm_id: string, name: string, since?: number, wake_mode?: string }} p */
+  parkMember(p) {
     if (!p.swarm_id || !p.name) {
       throw new StoreError("INVALID_ARG", "swarm_id and name are required");
     }
@@ -414,7 +383,7 @@ export class FileStore {
     if (m.killed) return { member: structuredClone(m), park_blocked: false };
 
     const since = p.since ?? 0;
-    const candidate: Member = { ...m, wake_mode: wakeMode };
+    const candidate = { ...m, wake_mode: wakeMode };
     const unread = sd.messages.filter(
       (msg) => msg.seq > since && memberMatchesMessage(candidate, msg),
     );
@@ -437,14 +406,17 @@ export class FileStore {
     return { member: structuredClone(m), park_blocked: false };
   }
 
-  watch(swarmId: string, onSnapshot: (snap: WatchSnapshot) => void): () => void {
+  /**
+   * @param {string} swarmId
+   * @param {(snap: any) => void} onSnapshot
+   */
+  watch(swarmId, onSnapshot) {
     const sd = this.swarms.get(swarmId);
     if (!sd) throw new StoreError("NOT_FOUND", `swarm ${swarmId} not found`);
 
-    const sub: Subscriber = { lastSeq: sd.swarm.head_seq, onSnapshot };
+    const sub = { lastSeq: sd.swarm.head_seq, onSnapshot };
     sd.subs.add(sub);
 
-    // Emit initial full snapshot (since = 0).
     onSnapshot({
       version: 1,
       swarm_id: sd.swarm.swarm_id,

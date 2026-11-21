@@ -6,7 +6,7 @@ An external swarm coordinator and wake-on-`@mention` control plane layered on to
 
 ## Installation
 
-Requires **Node.js >= 22.18** (runs TypeScript natively, no build step or dependencies):
+Requires **Node.js >= 22** (zero dependencies, zero build step):
 
 ```bash
 # Run directly with npx
@@ -69,5 +69,5 @@ Configure `remote_board.json` in `swarm_board`:
 ## Testing
 
 ```bash
-node --test test/*.test.ts
+node --test test/*.test.js
 ```

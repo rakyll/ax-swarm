@@ -1,34 +1,24 @@
-import type { AXClient, TaskState } from "./axclient.ts";
-import { DesiredState, OwnerKind, Phase } from "./model.ts";
-import type { Swarm } from "./model.ts";
-import type { FileStore } from "./store.ts";
-
-export interface ReconcilerConfig {
-  pollIntervalMs?: number;
-  suspendGraceMs?: number;
-  swarmApiUrl: string;
-  defaultImage?: string;
-}
+// @ts-check
+import { DesiredState, OwnerKind, Phase } from "./model.js";
 
 export class Reconciler {
-  private readonly store: FileStore;
-  private readonly ax: AXClient;
-  private readonly pollIntervalMs: number;
-  private readonly suspendGraceMs: number;
-  private readonly swarmApiUrl: string;
-  private readonly defaultImage?: string;
-  private timer?: ReturnType<typeof setInterval>;
-
-  constructor(store: FileStore, ax: AXClient, cfg: ReconcilerConfig) {
+  /**
+   * @param {import("./store.js").FileStore} store
+   * @param {any} ax
+   * @param {{ pollIntervalMs?: number, suspendGraceMs?: number, swarmApiUrl: string, defaultImage?: string }} cfg
+   */
+  constructor(store, ax, cfg) {
     this.store = store;
     this.ax = ax;
     this.pollIntervalMs = cfg.pollIntervalMs ?? 2000;
     this.suspendGraceMs = cfg.suspendGraceMs ?? 15000;
     this.swarmApiUrl = cfg.swarmApiUrl;
     this.defaultImage = cfg.defaultImage;
+    /** @type {ReturnType<typeof setInterval> | undefined} */
+    this.timer = undefined;
   }
 
-  start(): void {
+  start() {
     if (this.timer) return;
     void this.reconcileOnce().catch((e) => console.error("reconcile error:", e));
     this.timer = setInterval(() => {
@@ -36,14 +26,14 @@ export class Reconciler {
     }, this.pollIntervalMs);
   }
 
-  stop(): void {
+  stop() {
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = undefined;
     }
   }
 
-  async reconcileOnce(): Promise<void> {
+  async reconcileOnce() {
     for (const sw of this.store.listSwarms()) {
       try {
         await this.reconcileSwarm(sw);
@@ -53,9 +43,11 @@ export class Reconciler {
     }
   }
 
-  private async reconcileSwarm(sw: Swarm): Promise<void> {
+  /** @param {any} sw */
+  async reconcileSwarm(sw) {
     const tasks = await this.ax.listTasks(sw.atespace);
-    const byName = new Map<string, TaskState>(tasks.map((t) => [t.name, t.state]));
+    /** @type {Map<string, string>} */
+    const byName = new Map(tasks.map((/** @type {any} */ t) => [t.name, t.state]));
     const now = Date.now();
 
     for (const m of Object.values(sw.members)) {

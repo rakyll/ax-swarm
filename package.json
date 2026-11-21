@@ -4,14 +4,14 @@
   "description": "External swarm coordinator and wake-on-@mention control plane for AX",
   "type": "module",
   "engines": {
-    "node": ">=22.18.0"
+    "node": ">=22.0.0"
   },
   "bin": {
-    "ax-swarm": "./bin/ax-swarm.ts",
-    "ax-swarm-worker": "./bin/ax-swarm-worker.ts"
+    "ax-swarm": "./bin/ax-swarm.js",
+    "ax-swarm-worker": "./bin/ax-swarm-worker.js"
   },
   "scripts": {
-    "test": "node --test test/*.test.ts"
+    "test": "node --test test/*.test.js"
   },
   "files": [
     "bin/",

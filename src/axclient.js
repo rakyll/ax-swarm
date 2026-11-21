@@ -1,58 +1,30 @@
+// @ts-check
 import { execFile } from "node:child_process";
 
-export type TaskState = "Unknown" | "Suspended" | "Working" | "Completed" | "Failed";
-
-export interface TaskSpec {
-  name: string;
-  atespace: string;
-  workspace?: string;
-  image?: string;
-  goal?: string;
-  commands?: string[];
-  env?: Record<string, string>;
-  debug?: boolean;
-}
-
-export interface TaskInfo {
-  name: string;
-  atespace: string;
-  state: TaskState;
-}
-
-export interface AXClient {
-  createTask(spec: TaskSpec): Promise<void>;
-  resumeTask(atespace: string, name: string): Promise<void>;
-  suspendTask(atespace: string, name: string): Promise<void>;
-  deleteTask(atespace: string, name: string): Promise<void>;
-  listTasks(atespace: string): Promise<TaskInfo[]>;
-}
-
-export interface CLIAXClientOptions {
-  binary?: string;
-  context?: string;
-  server?: string;
-}
-
-export class CLIAXClient implements AXClient {
-  private readonly binary: string;
-  private readonly context?: string;
-  private readonly server?: string;
-
-  constructor(opts: CLIAXClientOptions = {}) {
+export class CLIAXClient {
+  /** @param {{ binary?: string, context?: string, server?: string }} [opts] */
+  constructor(opts = {}) {
     this.binary = opts.binary || "ax";
     this.context = opts.context;
     this.server = opts.server;
   }
 
-  private baseArgs(atespace: string): string[] {
-    const args: string[] = [];
+  /** @param {string} atespace */
+  baseArgs(atespace) {
+    /** @type {string[]} */
+    const args = [];
     if (atespace) args.push("-a", atespace);
     if (this.context) args.push("--context", this.context);
     if (this.server) args.push("--server", this.server);
     return args;
   }
 
-  private run(args: string[], stdin?: string): Promise<string> {
+  /**
+   * @param {string[]} args
+   * @param {string} [stdin]
+   * @returns {Promise<string>}
+   */
+  run(args, stdin) {
     return new Promise((resolve, reject) => {
       const child = execFile(this.binary, args, { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
         if (err) {
@@ -67,79 +39,112 @@ export class CLIAXClient implements AXClient {
     });
   }
 
-  async createTask(spec: TaskSpec): Promise<void> {
+  /** @param {any} spec */
+  async createTask(spec) {
     await this.run([...this.baseArgs(spec.atespace), "apply", "-f", "-"], renderTaskYAML(spec));
   }
 
-  async resumeTask(atespace: string, name: string): Promise<void> {
+  /**
+   * @param {string} atespace
+   * @param {string} name
+   */
+  async resumeTask(atespace, name) {
     await this.run([...this.baseArgs(atespace), "resume", "task", name]);
   }
 
-  async suspendTask(atespace: string, name: string): Promise<void> {
+  /**
+   * @param {string} atespace
+   * @param {string} name
+   */
+  async suspendTask(atespace, name) {
     await this.run([...this.baseArgs(atespace), "suspend", "task", name]);
   }
 
-  async deleteTask(atespace: string, name: string): Promise<void> {
+  /**
+   * @param {string} atespace
+   * @param {string} name
+   */
+  async deleteTask(atespace, name) {
     await this.run([...this.baseArgs(atespace), "delete", "task", name]);
   }
 
-  async listTasks(atespace: string): Promise<TaskInfo[]> {
+  /** @param {string} atespace */
+  async listTasks(atespace) {
     const out = await this.run([...this.baseArgs(atespace), "get", "tasks"]);
-    const tasks: TaskInfo[] = [];
+    const tasks = [];
     const lines = out.split("\n");
     for (let i = 1; i < lines.length; i++) {
       const fields = lines[i].trim().split(/\s+/);
       if (fields.length < 3) continue;
-      tasks.push({
-        name: fields[0],
-        atespace: fields[1],
-        state: fields[2] as TaskState,
-      });
+      tasks.push({ name: fields[0], atespace: fields[1], state: fields[2] });
     }
     return tasks;
   }
 }
 
-export class MockAXClient implements AXClient {
-  readonly tasks = new Map<string, TaskState>();
-  readonly specs = new Map<string, TaskSpec>();
-  readonly calls: string[] = [];
+export class MockAXClient {
+  constructor() {
+    /** @type {Map<string, string>} */
+    this.tasks = new Map();
+    /** @type {Map<string, any>} */
+    this.specs = new Map();
+    /** @type {string[]} */
+    this.calls = [];
+  }
 
-  private key(atespace: string, name: string): string {
+  /**
+   * @param {string} atespace
+   * @param {string} name
+   */
+  key(atespace, name) {
     return `${atespace}/${name}`;
   }
 
-  async createTask(spec: TaskSpec): Promise<void> {
+  /** @param {any} spec */
+  async createTask(spec) {
     const k = this.key(spec.atespace, spec.name);
     this.calls.push(`create:${k}`);
     if (!this.tasks.has(k)) this.tasks.set(k, "Suspended");
     this.specs.set(k, spec);
   }
 
-  async resumeTask(atespace: string, name: string): Promise<void> {
+  /**
+   * @param {string} atespace
+   * @param {string} name
+   */
+  async resumeTask(atespace, name) {
     const k = this.key(atespace, name);
     this.calls.push(`resume:${k}`);
     if (!this.tasks.has(k)) throw new Error(`task ${k} not found`);
     this.tasks.set(k, "Working");
   }
 
-  async suspendTask(atespace: string, name: string): Promise<void> {
+  /**
+   * @param {string} atespace
+   * @param {string} name
+   */
+  async suspendTask(atespace, name) {
     const k = this.key(atespace, name);
     this.calls.push(`suspend:${k}`);
     if (!this.tasks.has(k)) throw new Error(`task ${k} not found`);
     this.tasks.set(k, "Suspended");
   }
 
-  async deleteTask(atespace: string, name: string): Promise<void> {
+  /**
+   * @param {string} atespace
+   * @param {string} name
+   */
+  async deleteTask(atespace, name) {
     const k = this.key(atespace, name);
     this.calls.push(`delete:${k}`);
     this.tasks.delete(k);
     this.specs.delete(k);
   }
 
-  async listTasks(atespace: string): Promise<TaskInfo[]> {
+  /** @param {string} atespace */
+  async listTasks(atespace) {
     const prefix = `${atespace}/`;
-    const out: TaskInfo[] = [];
+    const out = [];
     for (const [k, state] of this.tasks.entries()) {
       if (k.startsWith(prefix)) {
         out.push({ name: k.slice(prefix.length), atespace, state });
@@ -148,12 +153,17 @@ export class MockAXClient implements AXClient {
     return out;
   }
 
-  state(atespace: string, name: string): TaskState | undefined {
+  /**
+   * @param {string} atespace
+   * @param {string} name
+   */
+  state(atespace, name) {
     return this.tasks.get(this.key(atespace, name));
   }
 }
 
-function renderTaskYAML(spec: TaskSpec): string {
+/** @param {any} spec */
+function renderTaskYAML(spec) {
   const lines = [
     "apiVersion: ax.io/v1alpha1",
     "kind: Task",

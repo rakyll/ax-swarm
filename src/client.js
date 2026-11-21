@@ -1,29 +1,30 @@
-import type { Member, Message, Swarm, WatchSnapshot } from "./model.ts";
-import type {
-  AddMemberParams,
-  CreateSwarmParams,
-  ParkMemberParams,
-  ParkResult,
-  PostMessageParams,
-} from "./store.ts";
+// @ts-check
 
 export class SwarmClient {
-  private readonly baseUrl: string;
-  private readonly token?: string;
-
-  constructor(baseUrl: string, token?: string) {
+  /**
+   * @param {string} baseUrl
+   * @param {string} [token]
+   */
+  constructor(baseUrl, token) {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
     this.token = token;
   }
 
-  private headers(hasBody: boolean): Record<string, string> {
-    const h: Record<string, string> = {};
+  /** @param {boolean} hasBody */
+  headers(hasBody) {
+    /** @type {Record<string, string>} */
+    const h = {};
     if (hasBody) h["Content-Type"] = "application/json";
     if (this.token) h["Authorization"] = `Bearer ${this.token}`;
     return h;
   }
 
-  private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  /**
+   * @param {string} method
+   * @param {string} path
+   * @param {unknown} [body]
+   */
+  async request(method, path, body) {
     const resp = await fetch(`${this.baseUrl}${path}`, {
       method,
       headers: this.headers(body !== undefined),
@@ -32,42 +33,55 @@ export class SwarmClient {
     if (!resp.ok) {
       throw new Error(`HTTP ${resp.status}: ${(await resp.text()).trim()}`);
     }
-    return (await resp.json()) as T;
+    return await resp.json();
   }
 
-  createSwarm(p: CreateSwarmParams): Promise<Swarm> {
+  /** @param {any} p */
+  createSwarm(p) {
     return this.request("POST", "/v1/swarms", p);
   }
 
-  getSwarm(swarmId: string): Promise<Swarm> {
+  /** @param {string} swarmId */
+  getSwarm(swarmId) {
     return this.request("GET", `/v1/swarms/${encodeURIComponent(swarmId)}`);
   }
 
-  setTitle(swarmId: string, title: string): Promise<Swarm> {
+  /**
+   * @param {string} swarmId
+   * @param {string} title
+   */
+  setTitle(swarmId, title) {
     return this.request("PUT", `/v1/swarms/${encodeURIComponent(swarmId)}/title`, { title });
   }
 
-  addMember(p: AddMemberParams): Promise<{ member: Member; token: string; brief_message?: Message }> {
+  /** @param {any} p */
+  addMember(p) {
     const { swarm_id, ...rest } = p;
     return this.request("POST", `/v1/swarms/${encodeURIComponent(swarm_id)}/members`, rest);
   }
 
-  killMember(swarmId: string, name: string): Promise<Member> {
+  /**
+   * @param {string} swarmId
+   * @param {string} name
+   */
+  killMember(swarmId, name) {
     return this.request(
       "DELETE",
       `/v1/swarms/${encodeURIComponent(swarmId)}/members/${encodeURIComponent(name)}`,
     );
   }
 
-  postMessage(p: PostMessageParams): Promise<{ message: Message; woken: string[] }> {
+  /** @param {any} p */
+  postMessage(p) {
     const { swarm_id, ...rest } = p;
     return this.request("POST", `/v1/swarms/${encodeURIComponent(swarm_id)}/messages`, rest);
   }
 
-  readBoard(
-    swarmId: string,
-    opts: { member?: string; since?: number; channel?: string } = {},
-  ): Promise<{ head: number; messages: Message[] }> {
+  /**
+   * @param {string} swarmId
+   * @param {{ member?: string, since?: number, channel?: string }} [opts]
+   */
+  readBoard(swarmId, opts = {}) {
     const q = new URLSearchParams();
     if (opts.since) q.set("since", String(opts.since));
     if (opts.member) q.set("member", opts.member);
@@ -79,7 +93,8 @@ export class SwarmClient {
     );
   }
 
-  parkMember(p: ParkMemberParams): Promise<ParkResult> {
+  /** @param {any} p */
+  parkMember(p) {
     const { swarm_id, name, ...rest } = p;
     return this.request(
       "POST",
@@ -88,11 +103,12 @@ export class SwarmClient {
     );
   }
 
-  async watch(
-    swarmId: string,
-    onSnapshot: (snap: WatchSnapshot) => void,
-    signal?: AbortSignal,
-  ): Promise<void> {
+  /**
+   * @param {string} swarmId
+   * @param {(snap: any) => void} onSnapshot
+   * @param {AbortSignal} [signal]
+   */
+  async watch(swarmId, onSnapshot, signal) {
     const resp = await fetch(`${this.baseUrl}/v1/swarms/${encodeURIComponent(swarmId)}/watch`, {
       headers: this.headers(false),
       signal,
@@ -108,11 +124,11 @@ export class SwarmClient {
         const { done, value } = await reader.read();
         if (done) break;
         buf += decoder.decode(value, { stream: true });
-        let idx: number;
+        let idx;
         while ((idx = buf.indexOf("\n")) >= 0) {
           const line = buf.slice(0, idx).trim();
           buf = buf.slice(idx + 1);
-          if (line) onSnapshot(JSON.parse(line) as WatchSnapshot);
+          if (line) onSnapshot(JSON.parse(line));
         }
       }
     } catch (err) {

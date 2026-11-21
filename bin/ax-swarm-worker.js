@@ -1,13 +1,17 @@
 #!/usr/bin/env node
+// @ts-check
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { SwarmClient } from "../src/client.ts";
-import { WakeMode } from "../src/model.ts";
-import type { Message } from "../src/model.ts";
+import { SwarmClient } from "../src/client.js";
+import { WakeMode } from "../src/model.js";
 
-function formatPrompt(member: string, msgs: Message[]): string {
+/**
+ * @param {string} member
+ * @param {any[]} msgs
+ */
+function formatPrompt(member, msgs) {
   const lines = [`You are swarm member @${member}. New board messages:\n`];
   for (const m of msgs) {
     lines.push(`#${m.seq} [${m.agent}]: ${m.text}`);
@@ -16,7 +20,12 @@ function formatPrompt(member: string, msgs: Message[]): string {
   return lines.join("\n");
 }
 
-function runHarness(harnessCmd: string, prompt: string): Promise<void> {
+/**
+ * @param {string} harnessCmd
+ * @param {string} prompt
+ * @returns {Promise<void>}
+ */
+function runHarness(harnessCmd, prompt) {
   if (!harnessCmd.trim()) {
     console.log(`no SWARM_HARNESS_CMD configured; received prompt:\n${prompt}`);
     return Promise.resolve();
@@ -32,7 +41,7 @@ function runHarness(harnessCmd: string, prompt: string): Promise<void> {
   });
 }
 
-async function main(): Promise<void> {
+async function main() {
   const { values } = parseArgs({
     options: {
       "api-url": { type: "string", default: process.env.SWARM_API_URL || "" },
@@ -44,14 +53,14 @@ async function main(): Promise<void> {
     },
   });
 
-  const apiUrl = values["api-url"]!;
-  const swarmId = values.swarm!;
-  const member = values.member!;
+  const apiUrl = /** @type {string} */ (values["api-url"]);
+  const swarmId = /** @type {string} */ (values.swarm);
+  const member = /** @type {string} */ (values.member);
   if (!apiUrl || !swarmId || !member) {
     throw new Error("SWARM_API_URL, SWARM_ID, and SWARM_MEMBER are required");
   }
 
-  const stateDir = values["state-dir"]!;
+  const stateDir = /** @type {string} */ (values["state-dir"]);
   mkdirSync(stateDir, { recursive: true });
   const cursorPath = join(stateDir, "last_seq");
   let since = existsSync(cursorPath) ? Number(readFileSync(cursorPath, "utf8").trim()) || 0 : 0;
@@ -63,7 +72,7 @@ async function main(): Promise<void> {
     if (resp.messages.length > 0) {
       const prompt = formatPrompt(member, resp.messages);
       try {
-        await runHarness(values.harness!, prompt);
+        await runHarness(/** @type {string} */ (values.harness), prompt);
       } catch (err) {
         await client
           .postMessage({

@@ -1,23 +1,24 @@
 #!/usr/bin/env node
+// @ts-check
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { CLIAXClient, MockAXClient } from "../src/axclient.ts";
-import { SwarmClient } from "../src/client.ts";
-import { DEFAULT_CHANNEL, WakeMode } from "../src/model.ts";
-import { Reconciler } from "../src/reconciler.ts";
-import { createSwarmServer } from "../src/server.ts";
-import { FileStore } from "../src/store.ts";
+import { CLIAXClient, MockAXClient } from "../src/axclient.js";
+import { SwarmClient } from "../src/client.js";
+import { DEFAULT_CHANNEL, WakeMode } from "../src/model.js";
+import { Reconciler } from "../src/reconciler.js";
+import { createSwarmServer } from "../src/server.js";
+import { FileStore } from "../src/store.js";
 
-function defaultServerUrl(): string {
+function defaultServerUrl() {
   return process.env.SWARM_API_URL || "http://127.0.0.1:8787";
 }
 
-function defaultDataDir(): string {
+function defaultDataDir() {
   return process.env.AX_SWARM_DATA_DIR || join(homedir(), ".ax-swarm", "data");
 }
 
-function usage(): void {
+function usage() {
   console.error(`ax-swarm — external swarm coordinator & wake-on-@mention control plane for AX
 
 Usage:
@@ -33,11 +34,13 @@ Usage:
   ax-swarm swarm   --json [--watch | --roster-only] [--db <db>] <swarm-id...>`);
 }
 
-function newClient(serverUrl: string): SwarmClient {
+/** @param {string} serverUrl */
+function newClient(serverUrl) {
   return new SwarmClient(serverUrl, process.env.SWARM_TOKEN);
 }
 
-async function cmdServe(args: string[]): Promise<void> {
+/** @param {string[]} args */
+async function cmdServe(args) {
   const { values } = parseArgs({
     args,
     options: {
@@ -54,7 +57,7 @@ async function cmdServe(args: string[]): Promise<void> {
     },
   });
 
-  const store = new FileStore(values["data-dir"]!);
+  const store = new FileStore(/** @type {string} */ (values["data-dir"]));
   const ax =
     values.ax === "mock"
       ? new MockAXClient()
@@ -68,7 +71,7 @@ async function cmdServe(args: string[]): Promise<void> {
             throw new Error(`invalid --ax mode ${values.ax} (want cli or mock)`);
           })();
 
-  const addr = values.addr!;
+  const addr = /** @type {string} */ (values.addr);
   const lastColon = addr.lastIndexOf(":");
   const host = lastColon > 0 ? addr.slice(0, lastColon) : "127.0.0.1";
   const port = Number(lastColon >= 0 ? addr.slice(lastColon + 1) : addr);
@@ -89,15 +92,16 @@ async function cmdServe(args: string[]): Promise<void> {
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 
-  await new Promise<void>((resolve) => {
+  await new Promise((resolve) => {
     srv.listen(port, host, () => {
       console.log(`ax-swarm listening on http://${host}:${port} (data=${values["data-dir"]}, ax=${values.ax})`);
-      resolve();
+      resolve(undefined);
     });
   });
 }
 
-async function cmdCreate(args: string[]): Promise<void> {
+/** @param {string[]} args */
+async function cmdCreate(args) {
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
@@ -109,7 +113,7 @@ async function cmdCreate(args: string[]): Promise<void> {
     },
   });
   if (positionals.length < 1) throw new Error("usage: ax-swarm create <swarm-id>");
-  const sw = await newClient(values.server!).createSwarm({
+  const sw = await newClient(/** @type {string} */ (values.server)).createSwarm({
     swarm_id: positionals[0],
     atespace: values.atespace,
     title: values.title,
@@ -118,18 +122,23 @@ async function cmdCreate(args: string[]): Promise<void> {
   console.log(`created swarm ${sw.swarm_id} (atespace=${sw.atespace})`);
 }
 
-async function cmdTitle(args: string[]): Promise<void> {
+/** @param {string[]} args */
+async function cmdTitle(args) {
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
     options: { server: { type: "string", default: defaultServerUrl() } },
   });
   if (positionals.length < 2) throw new Error("usage: ax-swarm title <swarm-id> <title...>");
-  const sw = await newClient(values.server!).setTitle(positionals[0], positionals.slice(1).join(" "));
+  const sw = await newClient(/** @type {string} */ (values.server)).setTitle(
+    positionals[0],
+    positionals.slice(1).join(" "),
+  );
   console.log(`swarm ${sw.swarm_id} title: ${sw.title}`);
 }
 
-async function cmdAdd(args: string[]): Promise<void> {
+/** @param {string[]} args */
+async function cmdAdd(args) {
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
@@ -145,7 +154,7 @@ async function cmdAdd(args: string[]): Promise<void> {
     },
   });
   if (positionals.length < 2) throw new Error("usage: ax-swarm add <swarm-id> <name> --brief '...'");
-  const resp = await newClient(values.server!).addMember({
+  const resp = await newClient(/** @type {string} */ (values.server)).addMember({
     swarm_id: positionals[0],
     name: positionals[1],
     role: values.role,
@@ -161,25 +170,27 @@ async function cmdAdd(args: string[]): Promise<void> {
   );
 }
 
-async function cmdKill(args: string[]): Promise<void> {
+/** @param {string[]} args */
+async function cmdKill(args) {
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
     options: { server: { type: "string", default: defaultServerUrl() } },
   });
   if (positionals.length < 2) throw new Error("usage: ax-swarm kill <swarm-id> <name>");
-  const m = await newClient(values.server!).killMember(positionals[0], positionals[1]);
+  const m = await newClient(/** @type {string} */ (values.server)).killMember(positionals[0], positionals[1]);
   console.log(`killed ${m.name} (phase=${m.phase})`);
 }
 
-async function cmdStatus(args: string[]): Promise<void> {
+/** @param {string[]} args */
+async function cmdStatus(args) {
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
     options: { server: { type: "string", default: defaultServerUrl() } },
   });
   if (positionals.length < 1) throw new Error("usage: ax-swarm status <swarm-id>");
-  const sw = await newClient(values.server!).getSwarm(positionals[0]);
+  const sw = await newClient(/** @type {string} */ (values.server)).getSwarm(positionals[0]);
   console.log(`Swarm: ${sw.swarm_id}  Title: "${sw.title}"  Atespace: ${sw.atespace}  Head: #${sw.head_seq}\n`);
   console.log("NAME\tROLE\tPHASE\tDESIRED\tWAKE\tREAD\tRUNTIME");
   for (const name of Object.keys(sw.members).sort()) {
@@ -190,7 +201,8 @@ async function cmdStatus(args: string[]): Promise<void> {
   }
 }
 
-async function cmdPost(args: string[]): Promise<void> {
+/** @param {string[]} args */
+async function cmdPost(args) {
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
@@ -201,16 +213,17 @@ async function cmdPost(args: string[]): Promise<void> {
     },
   });
   if (positionals.length < 2) throw new Error("usage: ax-swarm post <swarm-id> <message...>");
-  const resp = await newClient(values.server!).postMessage({
+  const resp = await newClient(/** @type {string} */ (values.server)).postMessage({
     swarm_id: positionals[0],
-    agent: values.as!,
+    agent: values.as,
     channel: values.channel,
     text: positionals.slice(1).join(" "),
   });
   console.log(`#${resp.message.seq} [${resp.message.agent}] ${resp.message.text} (woken: ${resp.woken.join(",")})`);
 }
 
-async function cmdRead(args: string[]): Promise<void> {
+/** @param {string[]} args */
+async function cmdRead(args) {
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
@@ -222,7 +235,7 @@ async function cmdRead(args: string[]): Promise<void> {
     },
   });
   if (positionals.length < 1) throw new Error("usage: ax-swarm read <swarm-id>");
-  const resp = await newClient(values.server!).readBoard(positionals[0], {
+  const resp = await newClient(/** @type {string} */ (values.server)).readBoard(positionals[0], {
     since: Number(values.since),
     member: values.as,
     channel: values.channel,
@@ -232,7 +245,8 @@ async function cmdRead(args: string[]): Promise<void> {
   }
 }
 
-async function cmdWait(args: string[]): Promise<void> {
+/** @param {string[]} args */
+async function cmdWait(args) {
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
@@ -246,11 +260,11 @@ async function cmdWait(args: string[]): Promise<void> {
   if (positionals.length < 1 || !values.as) {
     throw new Error("usage: ax-swarm wait <swarm-id> --as <member> [--since N]");
   }
-  const res = await newClient(values.server!).parkMember({
+  const res = await newClient(/** @type {string} */ (values.server)).parkMember({
     swarm_id: positionals[0],
     name: values.as,
     since: Number(values.since),
-    wake_mode: values["wake-mode"] as WakeMode,
+    wake_mode: values["wake-mode"],
   });
   if (res.park_blocked) {
     console.log(`park blocked (${res.unread?.length ?? 0} unread matching messages)`);
@@ -262,10 +276,8 @@ async function cmdWait(args: string[]): Promise<void> {
   console.log(`parked ${res.member.name} (waiting since #${res.member.wait_since}, wake=${res.member.wake_mode})`);
 }
 
-// Antigravity swarm_board remote_board viewer protocol:
-//   ax-swarm swarm --json --watch [--db <db>] <swarm-id>
-//   ax-swarm swarm --json --roster-only [--db <db>] <swarm-id...>
-async function cmdSwarmViewer(args: string[]): Promise<void> {
+/** @param {string[]} args */
+async function cmdSwarmViewer(args) {
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
@@ -281,7 +293,7 @@ async function cmdSwarmViewer(args: string[]): Promise<void> {
     throw new Error("usage: ax-swarm swarm --json [--watch|--roster-only] [--db <db>] <swarm-id...>");
   }
 
-  const client = newClient(values.server!);
+  const client = newClient(/** @type {string} */ (values.server));
 
   if (values.watch) {
     const ac = new AbortController();
@@ -342,7 +354,8 @@ if (!cmd || cmd === "-h" || cmd === "--help" || cmd === "help") {
   process.exit(cmd ? 0 : 2);
 }
 
-const commands: Record<string, (args: string[]) => Promise<void>> = {
+/** @type {Record<string, (args: string[]) => Promise<void>>} */
+const commands = {
   serve: cmdServe,
   create: cmdCreate,
   title: cmdTitle,

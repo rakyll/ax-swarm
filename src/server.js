@@ -1,30 +1,33 @@
+// @ts-check
 import { createServer } from "node:http";
-import type { IncomingMessage, Server, ServerResponse } from "node:http";
-import { StoreError } from "./store.ts";
-import type {
-  AddMemberParams,
-  CreateSwarmParams,
-  FileStore,
-  ParkMemberParams,
-  PostMessageParams,
-} from "./store.ts";
+import { StoreError } from "./store.js";
 
-async function readJSON<T>(req: IncomingMessage): Promise<T> {
-  const chunks: Buffer[] = [];
+/** @param {import("node:http").IncomingMessage} req */
+async function readJSON(req) {
+  const chunks = [];
   for await (const chunk of req) {
     chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
   }
   const raw = Buffer.concat(chunks).toString("utf8");
-  return (raw ? JSON.parse(raw) : {}) as T;
+  return raw ? JSON.parse(raw) : {};
 }
 
-function writeJSON(res: ServerResponse, status: number, body: unknown): void {
+/**
+ * @param {import("node:http").ServerResponse} res
+ * @param {number} status
+ * @param {unknown} body
+ */
+function writeJSON(res, status, body) {
   const payload = JSON.stringify(body);
   res.writeHead(status, { "Content-Type": "application/json" });
   res.end(payload);
 }
 
-function writeError(res: ServerResponse, err: unknown): void {
+/**
+ * @param {import("node:http").ServerResponse} res
+ * @param {unknown} err
+ */
+function writeError(res, err) {
   if (err instanceof StoreError) {
     const status =
       err.code === "NOT_FOUND" ? 404 : err.code === "ALREADY_EXISTS" ? 409 : 400;
@@ -35,16 +38,22 @@ function writeError(res: ServerResponse, err: unknown): void {
   writeJSON(res, 500, { error: message });
 }
 
-export function createSwarmHandler(store: FileStore) {
-  function bearerIdentity(req: IncomingMessage) {
+/** @param {import("./store.js").FileStore} store */
+export function createSwarmHandler(store) {
+  /** @param {import("node:http").IncomingMessage} req */
+  function bearerIdentity(req) {
     const auth = req.headers.authorization;
-    if (!auth?.startsWith("Bearer ")) return { hasToken: false as const };
+    if (!auth?.startsWith("Bearer ")) return { hasToken: false, entry: undefined };
     const token = auth.slice("Bearer ".length).trim();
     const entry = token ? store.authenticateToken(token) : undefined;
-    return { hasToken: true as const, entry };
+    return { hasToken: true, entry };
   }
 
-  return async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  /**
+   * @param {import("node:http").IncomingMessage} req
+   * @param {import("node:http").ServerResponse} res
+   */
+  return async function handle(req, res) {
     try {
       const method = req.method || "GET";
       const url = new URL(req.url || "/", "http://localhost");
@@ -60,11 +69,9 @@ export function createSwarmHandler(store: FileStore) {
         return;
       }
 
-      // /v1/swarms
       if (parts.length === 2) {
         if (method === "POST") {
-          const body = await readJSON<CreateSwarmParams>(req);
-          writeJSON(res, 201, store.createSwarm(body));
+          writeJSON(res, 201, store.createSwarm(await readJSON(req)));
           return;
         }
         if (method === "GET") {
@@ -74,33 +81,28 @@ export function createSwarmHandler(store: FileStore) {
       }
 
       const swarmId = parts[2];
-      // /v1/swarms/:id
       if (parts.length === 3 && method === "GET") {
         writeJSON(res, 200, store.getSwarm(swarmId));
         return;
       }
 
-      // /v1/swarms/:id/title
       if (parts.length === 4 && parts[3] === "title" && method === "PUT") {
-        const body = await readJSON<{ title: string }>(req);
+        const body = await readJSON(req);
         writeJSON(res, 200, store.setTitle(swarmId, body.title));
         return;
       }
 
-      // /v1/swarms/:id/members
       if (parts.length === 4 && parts[3] === "members" && method === "POST") {
-        const body = await readJSON<Omit<AddMemberParams, "swarm_id">>(req);
+        const body = await readJSON(req);
         writeJSON(res, 201, store.addMember({ ...body, swarm_id: swarmId }));
         return;
       }
 
-      // /v1/swarms/:id/members/:name
       if (parts.length === 5 && parts[3] === "members" && method === "DELETE") {
         writeJSON(res, 200, store.killMember(swarmId, parts[4]));
         return;
       }
 
-      // /v1/swarms/:id/members/:name/park
       if (parts.length === 6 && parts[3] === "members" && parts[5] === "park" && method === "POST") {
         const memberName = parts[4];
         const auth = bearerIdentity(req);
@@ -114,15 +116,14 @@ export function createSwarmHandler(store: FileStore) {
             return;
           }
         }
-        const body = await readJSON<Omit<ParkMemberParams, "swarm_id" | "name">>(req);
+        const body = await readJSON(req);
         writeJSON(res, 200, store.parkMember({ ...body, swarm_id: swarmId, name: memberName }));
         return;
       }
 
-      // /v1/swarms/:id/messages
       if (parts.length === 4 && parts[3] === "messages") {
         if (method === "POST") {
-          const body = await readJSON<Omit<PostMessageParams, "swarm_id">>(req);
+          const body = await readJSON(req);
           const auth = bearerIdentity(req);
           if (auth.hasToken) {
             if (!auth.entry || auth.entry.swarm_id !== swarmId) {
@@ -151,7 +152,6 @@ export function createSwarmHandler(store: FileStore) {
         }
       }
 
-      // /v1/swarms/:id/watch (NDJSON stream)
       if (parts.length === 4 && parts[3] === "watch" && method === "GET") {
         res.writeHead(200, {
           "Content-Type": "application/x-ndjson",
@@ -171,6 +171,7 @@ export function createSwarmHandler(store: FileStore) {
   };
 }
 
-export function createSwarmServer(store: FileStore): Server {
+/** @param {import("./store.js").FileStore} store */
+export function createSwarmServer(store) {
   return createServer(createSwarmHandler(store));
 }
