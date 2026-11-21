@@ -1,0 +1,3704 @@
+{
+  "metadata": {
+    "timestamp_utc": "2026-11-21T21:40:45.905890+00:00",
+    "completed_utc": "2026-11-21T21:41:33.317133+00:00",
+    "ax_binary": "/Users/jbd/go/bin/ax",
+    "ax_version": "ax version dev+0b44e971e802-dirty (API v1alpha1)",
+    "ax_server_tunnel": "http://127.0.0.1:54380",
+    "ax_image": "localhost:5001/ax-runner:latest@sha256:f2651e18c50310cee1b2afb8896bc86acb76f0165e7fb396cca7f6ca60858d21",
+    "host_cpu_brand": "Apple M4",
+    "host_uname": "Darwin MacBook-Pro-2.local 25.6.0 Darwin Kernel Version 25.6.0: Fri Jul 31 19:11:03 PDT 2026; root:xnu-12377.161.14~5/RELEASE_ARM64_T8132 x86_64 i386",
+    "workload_order": [
+      "noop",
+      "cpu_sieve",
+      "cpu_math",
+      "mem_json"
+    ],
+    "workload_snippets": {
+      "env": "import json,os,platform,socket,sys\ninfo={\"python_version\":sys.version,\"executable\":sys.executable,\"platform\":platform.platform(),\"system\":platform.system(),\"machine\":platform.machine(),\"hostname\":socket.gethostname(),\"cpu_count\":os.cpu_count(),\"pid\":os.getpid(),\"cwd\":os.getcwd()}\nos_rel=\"\"\ntry:\n os_rel=open(\"/etc/os-release\").read().strip().splitlines()[0]\nexcept Exception:\n pass\ninfo[\"os_release\"]=os_rel\nprint(\"BENCH_RESULT:\"+json.dumps(info))",
+      "noop": "import json,time\nt0=time.perf_counter()\nval=1\nt1=time.perf_counter()\nprint(\"BENCH_RESULT:\"+json.dumps({\"workload\":\"noop\",\"in_python_ms\":round((t1-t0)*1000.0,6),\"checksum\":val}))",
+      "cpu_sieve": "import json,time\nt0=time.perf_counter()\nn=5000000\nsieve=bytearray(b\"\\x01\")*(n+1)\nsieve[0:2]=b\"\\x00\\x00\"\nlimit=int(n**0.5)+1\nfor p in range(2,limit):\n if sieve[p]:\n  sieve[p*p:n+1:p]=b\"\\x00\"*(((n-p*p)//p)+1)\nprimes=[i for i,v in enumerate(sieve) if v]\ncount=len(primes)\ntotal=sum(primes)\nt1=time.perf_counter()\nprint(\"BENCH_RESULT:\"+json.dumps({\"workload\":\"cpu_sieve\",\"n\":n,\"in_python_ms\":round((t1-t0)*1000.0,3),\"prime_count\":count,\"checksum\":total}))",
+      "cpu_math": "import json,math,time\nt0=time.perf_counter()\nacc=0.0\nfor i in range(1,1500001):\n acc+=math.sin(i)*math.cos(i)+1.0/(i+1.0)\nt1=time.perf_counter()\nprint(\"BENCH_RESULT:\"+json.dumps({\"workload\":\"cpu_math\",\"iters\":1500000,\"in_python_ms\":round((t1-t0)*1000.0,3),\"checksum\":round(acc,6)}))",
+      "mem_json": "import json,time\nt0=time.perf_counter()\ndata=[{\"id\":i,\"group\":f\"g{i%64}\",\"name\":f\"item_{i:06d}\",\"values\":[i,i*2,(i*3)%997,round(i*0.125,3)],\"meta\":{\"active\":(i%2==0),\"tag\":f\"t{i%16}\"}} for i in range(50000)]\nraw=json.dumps(data)\nparsed=json.loads(raw)\ntotals={}\nfor row in parsed:\n g=row[\"group\"]\n totals[g]=totals.get(g,0)+row[\"values\"][2]\nchecksum=sum(totals.values())\nt1=time.perf_counter()\nprint(\"BENCH_RESULT:\"+json.dumps({\"workload\":\"mem_json\",\"records\":len(parsed),\"json_bytes\":len(raw),\"in_python_ms\":round((t1-t0)*1000.0,3),\"checksum\":checksum}))"
+    },
+    "remaining_tasks_after_cleanup": "NAME        ATESPACE   STATE    ACTOR    AGE\nsmoke-tpl   default    Failed   <none>   9m\nsmoke-py    default    Failed   <none>   10m"
+  },
+  "modes": {
+    "local_host_arm64": {
+      "mode": "local_host_arm64",
+      "env_wall_ms": 72.826,
+      "env": {
+        "python_version": "3.13.7 (v3.13.7:bcee1c32211, Aug 14 2025, 19:10:51) [Clang 16.0.0 (clang-1600.0.26.6)]",
+        "executable": "/usr/local/bin/python3",
+        "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+        "system": "Darwin",
+        "machine": "arm64",
+        "hostname": "MacBook-Pro-2.local",
+        "cpu_count": 10,
+        "pid": 29579,
+        "cwd": "/Users/jbd/ax-swarm",
+        "os_release": ""
+      },
+      "workloads": {
+        "noop": {
+          "iterations": 7,
+          "checksums": [
+            "1"
+          ],
+          "cold_run": {
+            "wall_ms": 27.65,
+            "in_python_ms": 0.000125,
+            "overhead_ms": 27.65
+          },
+          "all_runs_summary": {
+            "wall": {
+              "count": 7,
+              "min_ms": 27.65,
+              "median_ms": 29.846,
+              "mean_ms": 29.742,
+              "max_ms": 32.131,
+              "stdev_ms": 1.34
+            },
+            "in_python": {
+              "count": 7,
+              "min_ms": 0.0,
+              "median_ms": 0.0,
+              "mean_ms": 0.0,
+              "max_ms": 0.0,
+              "stdev_ms": 0.0
+            },
+            "overhead": {
+              "count": 7,
+              "min_ms": 27.65,
+              "median_ms": 29.846,
+              "mean_ms": 29.742,
+              "max_ms": 32.131,
+              "stdev_ms": 1.34
+            }
+          },
+          "warm_runs_summary": {
+            "wall": {
+              "count": 6,
+              "min_ms": 29.227,
+              "median_ms": 29.888,
+              "mean_ms": 30.091,
+              "max_ms": 32.131,
+              "stdev_ms": 1.064
+            },
+            "in_python": {
+              "count": 6,
+              "min_ms": 0.0,
+              "median_ms": 0.0,
+              "mean_ms": 0.0,
+              "max_ms": 0.0,
+              "stdev_ms": 0.0
+            },
+            "overhead": {
+              "count": 6,
+              "min_ms": 29.227,
+              "median_ms": 29.888,
+              "mean_ms": 30.091,
+              "max_ms": 32.131,
+              "stdev_ms": 1.064
+            }
+          },
+          "runs": [
+            {
+              "returncode": 0,
+              "wall_ms": 27.65,
+              "in_python_ms": 0.000125,
+              "overhead_ms": 27.65,
+              "parsed": {
+                "workload": "noop",
+                "in_python_ms": 0.000125,
+                "checksum": 1
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 1,
+              "is_cold": true
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 29.93,
+              "in_python_ms": 0.000125,
+              "overhead_ms": 29.93,
+              "parsed": {
+                "workload": "noop",
+                "in_python_ms": 0.000125,
+                "checksum": 1
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 2,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 29.846,
+              "in_python_ms": 0.000125,
+              "overhead_ms": 29.846,
+              "parsed": {
+                "workload": "noop",
+                "in_python_ms": 0.000125,
+                "checksum": 1
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 3,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 32.131,
+              "in_python_ms": 0.000125,
+              "overhead_ms": 32.131,
+              "parsed": {
+                "workload": "noop",
+                "in_python_ms": 0.000125,
+                "checksum": 1
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 4,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 29.227,
+              "in_python_ms": 0.000167,
+              "overhead_ms": 29.227,
+              "parsed": {
+                "workload": "noop",
+                "in_python_ms": 0.000167,
+                "checksum": 1
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 5,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 29.273,
+              "in_python_ms": 0.000125,
+              "overhead_ms": 29.273,
+              "parsed": {
+                "workload": "noop",
+                "in_python_ms": 0.000125,
+                "checksum": 1
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 6,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 30.139,
+              "in_python_ms": 0.000125,
+              "overhead_ms": 30.139,
+              "parsed": {
+                "workload": "noop",
+                "in_python_ms": 0.000125,
+                "checksum": 1
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 7,
+              "is_cold": false
+            }
+          ]
+        },
+        "cpu_sieve": {
+          "iterations": 7,
+          "checksums": [
+            "838596693108"
+          ],
+          "cold_run": {
+            "wall_ms": 109.092,
+            "in_python_ms": 75.639,
+            "overhead_ms": 33.453
+          },
+          "all_runs_summary": {
+            "wall": {
+              "count": 7,
+              "min_ms": 108.777,
+              "median_ms": 109.092,
+              "mean_ms": 112.329,
+              "max_ms": 131.316,
+              "stdev_ms": 8.386
+            },
+            "in_python": {
+              "count": 7,
+              "min_ms": 75.478,
+              "median_ms": 75.801,
+              "mean_ms": 78.353,
+              "max_ms": 92.768,
+              "stdev_ms": 6.375
+            },
+            "overhead": {
+              "count": 7,
+              "min_ms": 32.629,
+              "median_ms": 33.406,
+              "mean_ms": 33.976,
+              "max_ms": 38.548,
+              "stdev_ms": 2.038
+            }
+          },
+          "warm_runs_summary": {
+            "wall": {
+              "count": 6,
+              "min_ms": 108.777,
+              "median_ms": 109.039,
+              "mean_ms": 112.869,
+              "max_ms": 131.316,
+              "stdev_ms": 9.053
+            },
+            "in_python": {
+              "count": 6,
+              "min_ms": 75.478,
+              "median_ms": 76.135,
+              "mean_ms": 78.805,
+              "max_ms": 92.768,
+              "stdev_ms": 6.859
+            },
+            "overhead": {
+              "count": 6,
+              "min_ms": 32.629,
+              "median_ms": 33.352,
+              "mean_ms": 34.064,
+              "max_ms": 38.548,
+              "stdev_ms": 2.218
+            }
+          },
+          "runs": [
+            {
+              "returncode": 0,
+              "wall_ms": 109.092,
+              "in_python_ms": 75.639,
+              "overhead_ms": 33.453,
+              "parsed": {
+                "workload": "cpu_sieve",
+                "n": 5000000,
+                "in_python_ms": 75.639,
+                "prime_count": 348513,
+                "checksum": 838596693108
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 1,
+              "is_cold": true
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 109.098,
+              "in_python_ms": 76.469,
+              "overhead_ms": 32.629,
+              "parsed": {
+                "workload": "cpu_sieve",
+                "n": 5000000,
+                "in_python_ms": 76.469,
+                "prime_count": 348513,
+                "checksum": 838596693108
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 2,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 131.316,
+              "in_python_ms": 92.768,
+              "overhead_ms": 38.548,
+              "parsed": {
+                "workload": "cpu_sieve",
+                "n": 5000000,
+                "in_python_ms": 92.768,
+                "prime_count": 348513,
+                "checksum": 838596693108
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 3,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 108.98,
+              "in_python_ms": 75.574,
+              "overhead_ms": 33.406,
+              "parsed": {
+                "workload": "cpu_sieve",
+                "n": 5000000,
+                "in_python_ms": 75.574,
+                "prime_count": 348513,
+                "checksum": 838596693108
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 4,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 108.834,
+              "in_python_ms": 75.801,
+              "overhead_ms": 33.033,
+              "parsed": {
+                "workload": "cpu_sieve",
+                "n": 5000000,
+                "in_python_ms": 75.801,
+                "prime_count": 348513,
+                "checksum": 838596693108
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 5,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 108.777,
+              "in_python_ms": 75.478,
+              "overhead_ms": 33.299,
+              "parsed": {
+                "workload": "cpu_sieve",
+                "n": 5000000,
+                "in_python_ms": 75.478,
+                "prime_count": 348513,
+                "checksum": 838596693108
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 6,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 110.207,
+              "in_python_ms": 76.74,
+              "overhead_ms": 33.467,
+              "parsed": {
+                "workload": "cpu_sieve",
+                "n": 5000000,
+                "in_python_ms": 76.74,
+                "prime_count": 348513,
+                "checksum": 838596693108
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 7,
+              "is_cold": false
+            }
+          ]
+        },
+        "cpu_math": {
+          "iterations": 7,
+          "checksums": [
+            "13.662401"
+          ],
+          "cold_run": {
+            "wall_ms": 191.723,
+            "in_python_ms": 160.565,
+            "overhead_ms": 31.158
+          },
+          "all_runs_summary": {
+            "wall": {
+              "count": 7,
+              "min_ms": 186.91,
+              "median_ms": 192.616,
+              "mean_ms": 192.896,
+              "max_ms": 198.538,
+              "stdev_ms": 4.122
+            },
+            "in_python": {
+              "count": 7,
+              "min_ms": 155.873,
+              "median_ms": 160.565,
+              "mean_ms": 160.802,
+              "max_ms": 166.235,
+              "stdev_ms": 3.598
+            },
+            "overhead": {
+              "count": 7,
+              "min_ms": 31.037,
+              "median_ms": 31.552,
+              "mean_ms": 32.094,
+              "max_ms": 35.222,
+              "stdev_ms": 1.456
+            }
+          },
+          "warm_runs_summary": {
+            "wall": {
+              "count": 6,
+              "min_ms": 186.91,
+              "median_ms": 193.841,
+              "mean_ms": 193.092,
+              "max_ms": 198.538,
+              "stdev_ms": 4.48
+            },
+            "in_python": {
+              "count": 6,
+              "min_ms": 155.873,
+              "median_ms": 160.454,
+              "mean_ms": 160.841,
+              "max_ms": 166.235,
+              "stdev_ms": 3.94
+            },
+            "overhead": {
+              "count": 6,
+              "min_ms": 31.037,
+              "median_ms": 31.81,
+              "mean_ms": 32.25,
+              "max_ms": 35.222,
+              "stdev_ms": 1.529
+            }
+          },
+          "runs": [
+            {
+              "returncode": 0,
+              "wall_ms": 191.723,
+              "in_python_ms": 160.565,
+              "overhead_ms": 31.158,
+              "parsed": {
+                "workload": "cpu_math",
+                "iters": 1500000,
+                "in_python_ms": 160.565,
+                "checksum": 13.662401
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 1,
+              "is_cold": true
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 195.067,
+              "in_python_ms": 159.845,
+              "overhead_ms": 35.222,
+              "parsed": {
+                "workload": "cpu_math",
+                "iters": 1500000,
+                "in_python_ms": 159.845,
+                "checksum": 13.662401
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 2,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 192.616,
+              "in_python_ms": 161.064,
+              "overhead_ms": 31.552,
+              "parsed": {
+                "workload": "cpu_math",
+                "iters": 1500000,
+                "in_python_ms": 161.064,
+                "checksum": 13.662401
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 3,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 196.455,
+              "in_python_ms": 164.387,
+              "overhead_ms": 32.068,
+              "parsed": {
+                "workload": "cpu_math",
+                "iters": 1500000,
+                "in_python_ms": 164.387,
+                "checksum": 13.662401
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 4,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 198.538,
+              "in_python_ms": 166.235,
+              "overhead_ms": 32.303,
+              "parsed": {
+                "workload": "cpu_math",
+                "iters": 1500000,
+                "in_python_ms": 166.235,
+                "checksum": 13.662401
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 5,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 186.91,
+              "in_python_ms": 155.873,
+              "overhead_ms": 31.037,
+              "parsed": {
+                "workload": "cpu_math",
+                "iters": 1500000,
+                "in_python_ms": 155.873,
+                "checksum": 13.662401
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 6,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 188.964,
+              "in_python_ms": 157.645,
+              "overhead_ms": 31.319,
+              "parsed": {
+                "workload": "cpu_math",
+                "iters": 1500000,
+                "in_python_ms": 157.645,
+                "checksum": 13.662401
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 7,
+              "is_cold": false
+            }
+          ]
+        },
+        "mem_json": {
+          "iterations": 7,
+          "checksums": [
+            "24858825"
+          ],
+          "cold_run": {
+            "wall_ms": 169.282,
+            "in_python_ms": 104.479,
+            "overhead_ms": 64.803
+          },
+          "all_runs_summary": {
+            "wall": {
+              "count": 7,
+              "min_ms": 165.074,
+              "median_ms": 168.26,
+              "mean_ms": 169.121,
+              "max_ms": 173.986,
+              "stdev_ms": 2.96
+            },
+            "in_python": {
+              "count": 7,
+              "min_ms": 104.479,
+              "median_ms": 107.376,
+              "mean_ms": 107.339,
+              "max_ms": 109.943,
+              "stdev_ms": 1.826
+            },
+            "overhead": {
+              "count": 7,
+              "min_ms": 58.767,
+              "median_ms": 61.379,
+              "mean_ms": 61.782,
+              "max_ms": 66.489,
+              "stdev_ms": 2.918
+            }
+          },
+          "warm_runs_summary": {
+            "wall": {
+              "count": 6,
+              "min_ms": 165.074,
+              "median_ms": 168.077,
+              "mean_ms": 169.094,
+              "max_ms": 173.986,
+              "stdev_ms": 3.241
+            },
+            "in_python": {
+              "count": 6,
+              "min_ms": 106.07,
+              "median_ms": 107.436,
+              "mean_ms": 107.816,
+              "max_ms": 109.943,
+              "stdev_ms": 1.447
+            },
+            "overhead": {
+              "count": 6,
+              "min_ms": 58.767,
+              "median_ms": 60.742,
+              "mean_ms": 61.278,
+              "max_ms": 66.489,
+              "stdev_ms": 2.844
+            }
+          },
+          "runs": [
+            {
+              "returncode": 0,
+              "wall_ms": 169.282,
+              "in_python_ms": 104.479,
+              "overhead_ms": 64.803,
+              "parsed": {
+                "workload": "mem_json",
+                "records": 50000,
+                "json_bytes": 6656237,
+                "in_python_ms": 104.479,
+                "checksum": 24858825
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 1,
+              "is_cold": true
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 167.895,
+              "in_python_ms": 109.128,
+              "overhead_ms": 58.767,
+              "parsed": {
+                "workload": "mem_json",
+                "records": 50000,
+                "json_bytes": 6656237,
+                "in_python_ms": 109.128,
+                "checksum": 24858825
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 2,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 165.074,
+              "in_python_ms": 106.07,
+              "overhead_ms": 59.004,
+              "parsed": {
+                "workload": "mem_json",
+                "records": 50000,
+                "json_bytes": 6656237,
+                "in_python_ms": 106.07,
+                "checksum": 24858825
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 3,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 171.87,
+              "in_python_ms": 109.943,
+              "overhead_ms": 61.927,
+              "parsed": {
+                "workload": "mem_json",
+                "records": 50000,
+                "json_bytes": 6656237,
+                "in_python_ms": 109.943,
+                "checksum": 24858825
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 4,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 168.26,
+              "in_python_ms": 106.881,
+              "overhead_ms": 61.379,
+              "parsed": {
+                "workload": "mem_json",
+                "records": 50000,
+                "json_bytes": 6656237,
+                "in_python_ms": 106.881,
+                "checksum": 24858825
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 5,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 173.986,
+              "in_python_ms": 107.497,
+              "overhead_ms": 66.489,
+              "parsed": {
+                "workload": "mem_json",
+                "records": 50000,
+                "json_bytes": 6656237,
+                "in_python_ms": 107.497,
+                "checksum": 24858825
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 6,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 167.48,
+              "in_python_ms": 107.376,
+              "overhead_ms": 60.104,
+              "parsed": {
+                "workload": "mem_json",
+                "records": 50000,
+                "json_bytes": 6656237,
+                "in_python_ms": 107.376,
+                "checksum": 24858825
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 7,
+              "is_cold": false
+            }
+          ]
+        }
+      },
+      "command_template": "arch -arm64 /usr/local/bin/python3 - < <snippet>"
+    },
+    "local_host_rosetta_x86_64": {
+      "mode": "local_host_rosetta_x86_64",
+      "env_wall_ms": 88.191,
+      "env": {
+        "python_version": "3.13.7 (v3.13.7:bcee1c32211, Aug 14 2025, 19:10:51) [Clang 16.0.0 (clang-1600.0.26.6)]",
+        "executable": "/usr/local/bin/python3",
+        "platform": "macOS-26.6.2-x86_64-i386-64bit-Mach-O",
+        "system": "Darwin",
+        "machine": "x86_64",
+        "hostname": "MacBook-Pro-2.local",
+        "cpu_count": 10,
+        "pid": 29669,
+        "cwd": "/Users/jbd/ax-swarm",
+        "os_release": ""
+      },
+      "workloads": {
+        "noop": {
+          "iterations": 7,
+          "checksums": [
+            "1"
+          ],
+          "cold_run": {
+            "wall_ms": 41.78,
+            "in_python_ms": 0.000208,
+            "overhead_ms": 41.78
+          },
+          "all_runs_summary": {
+            "wall": {
+              "count": 7,
+              "min_ms": 41.78,
+              "median_ms": 44.497,
+              "mean_ms": 44.83,
+              "max_ms": 48.183,
+              "stdev_ms": 2.277
+            },
+            "in_python": {
+              "count": 7,
+              "min_ms": 0.0,
+              "median_ms": 0.0,
+              "mean_ms": 0.0,
+              "max_ms": 0.0,
+              "stdev_ms": 0.0
+            },
+            "overhead": {
+              "count": 7,
+              "min_ms": 41.78,
+              "median_ms": 44.497,
+              "mean_ms": 44.83,
+              "max_ms": 48.182,
+              "stdev_ms": 2.277
+            }
+          },
+          "warm_runs_summary": {
+            "wall": {
+              "count": 6,
+              "min_ms": 43.49,
+              "median_ms": 44.683,
+              "mean_ms": 45.338,
+              "max_ms": 48.183,
+              "stdev_ms": 2.013
+            },
+            "in_python": {
+              "count": 6,
+              "min_ms": 0.0,
+              "median_ms": 0.0,
+              "mean_ms": 0.0,
+              "max_ms": 0.0,
+              "stdev_ms": 0.0
+            },
+            "overhead": {
+              "count": 6,
+              "min_ms": 43.49,
+              "median_ms": 44.683,
+              "mean_ms": 45.338,
+              "max_ms": 48.182,
+              "stdev_ms": 2.013
+            }
+          },
+          "runs": [
+            {
+              "returncode": 0,
+              "wall_ms": 41.78,
+              "in_python_ms": 0.000208,
+              "overhead_ms": 41.78,
+              "parsed": {
+                "workload": "noop",
+                "in_python_ms": 0.000208,
+                "checksum": 1
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 1,
+              "is_cold": true
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 43.524,
+              "in_python_ms": 0.000209,
+              "overhead_ms": 43.524,
+              "parsed": {
+                "workload": "noop",
+                "in_python_ms": 0.000209,
+                "checksum": 1
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 2,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 44.87,
+              "in_python_ms": 0.000208,
+              "overhead_ms": 44.87,
+              "parsed": {
+                "workload": "noop",
+                "in_python_ms": 0.000208,
+                "checksum": 1
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 3,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 43.49,
+              "in_python_ms": 0.000167,
+              "overhead_ms": 43.49,
+              "parsed": {
+                "workload": "noop",
+                "in_python_ms": 0.000167,
+                "checksum": 1
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 4,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 47.467,
+              "in_python_ms": 0.000208,
+              "overhead_ms": 47.467,
+              "parsed": {
+                "workload": "noop",
+                "in_python_ms": 0.000208,
+                "checksum": 1
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 5,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 44.497,
+              "in_python_ms": 0.000208,
+              "overhead_ms": 44.497,
+              "parsed": {
+                "workload": "noop",
+                "in_python_ms": 0.000208,
+                "checksum": 1
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 6,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 48.183,
+              "in_python_ms": 0.000208,
+              "overhead_ms": 48.182,
+              "parsed": {
+                "workload": "noop",
+                "in_python_ms": 0.000208,
+                "checksum": 1
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 7,
+              "is_cold": false
+            }
+          ]
+        },
+        "cpu_sieve": {
+          "iterations": 7,
+          "checksums": [
+            "838596693108"
+          ],
+          "cold_run": {
+            "wall_ms": 193.02,
+            "in_python_ms": 140.063,
+            "overhead_ms": 52.957
+          },
+          "all_runs_summary": {
+            "wall": {
+              "count": 7,
+              "min_ms": 185.429,
+              "median_ms": 190.629,
+              "mean_ms": 190.607,
+              "max_ms": 198.5,
+              "stdev_ms": 4.397
+            },
+            "in_python": {
+              "count": 7,
+              "min_ms": 132.376,
+              "median_ms": 140.063,
+              "mean_ms": 139.289,
+              "max_ms": 146.235,
+              "stdev_ms": 4.383
+            },
+            "overhead": {
+              "count": 7,
+              "min_ms": 49.395,
+              "median_ms": 51.288,
+              "mean_ms": 51.318,
+              "max_ms": 53.053,
+              "stdev_ms": 1.479
+            }
+          },
+          "warm_runs_summary": {
+            "wall": {
+              "count": 6,
+              "min_ms": 185.429,
+              "median_ms": 189.088,
+              "mean_ms": 190.205,
+              "max_ms": 198.5,
+              "stdev_ms": 4.673
+            },
+            "in_python": {
+              "count": 6,
+              "min_ms": 132.376,
+              "median_ms": 139.264,
+              "mean_ms": 139.16,
+              "max_ms": 146.235,
+              "stdev_ms": 4.786
+            },
+            "overhead": {
+              "count": 6,
+              "min_ms": 49.395,
+              "median_ms": 50.77,
+              "mean_ms": 51.045,
+              "max_ms": 53.053,
+              "stdev_ms": 1.413
+            }
+          },
+          "runs": [
+            {
+              "returncode": 0,
+              "wall_ms": 193.02,
+              "in_python_ms": 140.063,
+              "overhead_ms": 52.957,
+              "parsed": {
+                "workload": "cpu_sieve",
+                "n": 5000000,
+                "in_python_ms": 140.063,
+                "prime_count": 348513,
+                "checksum": 838596693108
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 1,
+              "is_cold": true
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 185.429,
+              "in_python_ms": 132.376,
+              "overhead_ms": 53.053,
+              "parsed": {
+                "workload": "cpu_sieve",
+                "n": 5000000,
+                "in_python_ms": 132.376,
+                "prime_count": 348513,
+                "checksum": 838596693108
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 2,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 187.383,
+              "in_python_ms": 136.095,
+              "overhead_ms": 51.288,
+              "parsed": {
+                "workload": "cpu_sieve",
+                "n": 5000000,
+                "in_python_ms": 136.095,
+                "prime_count": 348513,
+                "checksum": 838596693108
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 3,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 198.5,
+              "in_python_ms": 146.235,
+              "overhead_ms": 52.265,
+              "parsed": {
+                "workload": "cpu_sieve",
+                "n": 5000000,
+                "in_python_ms": 146.235,
+                "prime_count": 348513,
+                "checksum": 838596693108
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 4,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 190.629,
+              "in_python_ms": 140.376,
+              "overhead_ms": 50.253,
+              "parsed": {
+                "workload": "cpu_sieve",
+                "n": 5000000,
+                "in_python_ms": 140.376,
+                "prime_count": 348513,
+                "checksum": 838596693108
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 5,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 191.744,
+              "in_python_ms": 141.726,
+              "overhead_ms": 50.018,
+              "parsed": {
+                "workload": "cpu_sieve",
+                "n": 5000000,
+                "in_python_ms": 141.726,
+                "prime_count": 348513,
+                "checksum": 838596693108
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 6,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 187.547,
+              "in_python_ms": 138.152,
+              "overhead_ms": 49.395,
+              "parsed": {
+                "workload": "cpu_sieve",
+                "n": 5000000,
+                "in_python_ms": 138.152,
+                "prime_count": 348513,
+                "checksum": 838596693108
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 7,
+              "is_cold": false
+            }
+          ]
+        },
+        "cpu_math": {
+          "iterations": 7,
+          "checksums": [
+            "13.662401"
+          ],
+          "cold_run": {
+            "wall_ms": 351.356,
+            "in_python_ms": 298.734,
+            "overhead_ms": 52.622
+          },
+          "all_runs_summary": {
+            "wall": {
+              "count": 7,
+              "min_ms": 335.302,
+              "median_ms": 345.719,
+              "mean_ms": 344.451,
+              "max_ms": 351.356,
+              "stdev_ms": 6.367
+            },
+            "in_python": {
+              "count": 7,
+              "min_ms": 289.828,
+              "median_ms": 298.734,
+              "mean_ms": 297.242,
+              "max_ms": 305.271,
+              "stdev_ms": 5.508
+            },
+            "overhead": {
+              "count": 7,
+              "min_ms": 45.474,
+              "median_ms": 45.866,
+              "mean_ms": 47.21,
+              "max_ms": 52.622,
+              "stdev_ms": 2.721
+            }
+          },
+          "warm_runs_summary": {
+            "wall": {
+              "count": 6,
+              "min_ms": 335.302,
+              "median_ms": 345.518,
+              "mean_ms": 343.3,
+              "max_ms": 351.137,
+              "stdev_ms": 6.126
+            },
+            "in_python": {
+              "count": 6,
+              "min_ms": 289.828,
+              "median_ms": 298.046,
+              "mean_ms": 296.993,
+              "max_ms": 305.271,
+              "stdev_ms": 5.991
+            },
+            "overhead": {
+              "count": 6,
+              "min_ms": 45.474,
+              "median_ms": 45.805,
+              "mean_ms": 46.307,
+              "max_ms": 49.202,
+              "stdev_ms": 1.432
+            }
+          },
+          "runs": [
+            {
+              "returncode": 0,
+              "wall_ms": 351.356,
+              "in_python_ms": 298.734,
+              "overhead_ms": 52.622,
+              "parsed": {
+                "workload": "cpu_math",
+                "iters": 1500000,
+                "in_python_ms": 298.734,
+                "checksum": 13.662401
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 1,
+              "is_cold": true
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 335.302,
+              "in_python_ms": 289.828,
+              "overhead_ms": 45.474,
+              "parsed": {
+                "workload": "cpu_math",
+                "iters": 1500000,
+                "in_python_ms": 289.828,
+                "checksum": 13.662401
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 2,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 345.719,
+              "in_python_ms": 296.517,
+              "overhead_ms": 49.202,
+              "parsed": {
+                "workload": "cpu_math",
+                "iters": 1500000,
+                "in_python_ms": 296.517,
+                "checksum": 13.662401
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 3,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 336.517,
+              "in_python_ms": 290.51,
+              "overhead_ms": 46.007,
+              "parsed": {
+                "workload": "cpu_math",
+                "iters": 1500000,
+                "in_python_ms": 290.51,
+                "checksum": 13.662401
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 4,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 345.317,
+              "in_python_ms": 299.574,
+              "overhead_ms": 45.743,
+              "parsed": {
+                "workload": "cpu_math",
+                "iters": 1500000,
+                "in_python_ms": 299.574,
+                "checksum": 13.662401
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 5,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 351.137,
+              "in_python_ms": 305.271,
+              "overhead_ms": 45.866,
+              "parsed": {
+                "workload": "cpu_math",
+                "iters": 1500000,
+                "in_python_ms": 305.271,
+                "checksum": 13.662401
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 6,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 345.81,
+              "in_python_ms": 300.257,
+              "overhead_ms": 45.553,
+              "parsed": {
+                "workload": "cpu_math",
+                "iters": 1500000,
+                "in_python_ms": 300.257,
+                "checksum": 13.662401
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 7,
+              "is_cold": false
+            }
+          ]
+        },
+        "mem_json": {
+          "iterations": 7,
+          "checksums": [
+            "24858825"
+          ],
+          "cold_run": {
+            "wall_ms": 264.602,
+            "in_python_ms": 174.82,
+            "overhead_ms": 89.782
+          },
+          "all_runs_summary": {
+            "wall": {
+              "count": 7,
+              "min_ms": 256.343,
+              "median_ms": 264.602,
+              "mean_ms": 263.078,
+              "max_ms": 267.702,
+              "stdev_ms": 4.006
+            },
+            "in_python": {
+              "count": 7,
+              "min_ms": 171.517,
+              "median_ms": 174.82,
+              "mean_ms": 175.123,
+              "max_ms": 180.433,
+              "stdev_ms": 3.007
+            },
+            "overhead": {
+              "count": 7,
+              "min_ms": 82.901,
+              "median_ms": 87.456,
+              "mean_ms": 87.955,
+              "max_ms": 96.185,
+              "stdev_ms": 4.445
+            }
+          },
+          "warm_runs_summary": {
+            "wall": {
+              "count": 6,
+              "min_ms": 256.343,
+              "median_ms": 263.636,
+              "mean_ms": 262.824,
+              "max_ms": 267.702,
+              "stdev_ms": 4.326
+            },
+            "in_python": {
+              "count": 6,
+              "min_ms": 171.517,
+              "median_ms": 174.363,
+              "mean_ms": 175.173,
+              "max_ms": 180.433,
+              "stdev_ms": 3.29
+            },
+            "overhead": {
+              "count": 6,
+              "min_ms": 82.901,
+              "median_ms": 86.626,
+              "mean_ms": 87.651,
+              "max_ms": 96.185,
+              "stdev_ms": 4.789
+            }
+          },
+          "runs": [
+            {
+              "returncode": 0,
+              "wall_ms": 264.602,
+              "in_python_ms": 174.82,
+              "overhead_ms": 89.782,
+              "parsed": {
+                "workload": "mem_json",
+                "records": 50000,
+                "json_bytes": 6656237,
+                "in_python_ms": 174.82,
+                "checksum": 24858825
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 1,
+              "is_cold": true
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 259.396,
+              "in_python_ms": 175.285,
+              "overhead_ms": 84.111,
+              "parsed": {
+                "workload": "mem_json",
+                "records": 50000,
+                "json_bytes": 6656237,
+                "in_python_ms": 175.285,
+                "checksum": 24858825
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 2,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 256.343,
+              "in_python_ms": 173.442,
+              "overhead_ms": 82.901,
+              "parsed": {
+                "workload": "mem_json",
+                "records": 50000,
+                "json_bytes": 6656237,
+                "in_python_ms": 173.442,
+                "checksum": 24858825
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 3,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 267.702,
+              "in_python_ms": 171.517,
+              "overhead_ms": 96.185,
+              "parsed": {
+                "workload": "mem_json",
+                "records": 50000,
+                "json_bytes": 6656237,
+                "in_python_ms": 171.517,
+                "checksum": 24858825
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 4,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 264.883,
+              "in_python_ms": 177.427,
+              "overhead_ms": 87.456,
+              "parsed": {
+                "workload": "mem_json",
+                "records": 50000,
+                "json_bytes": 6656237,
+                "in_python_ms": 177.427,
+                "checksum": 24858825
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 5,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 266.229,
+              "in_python_ms": 180.433,
+              "overhead_ms": 85.796,
+              "parsed": {
+                "workload": "mem_json",
+                "records": 50000,
+                "json_bytes": 6656237,
+                "in_python_ms": 180.433,
+                "checksum": 24858825
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 6,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 262.39,
+              "in_python_ms": 172.935,
+              "overhead_ms": 89.455,
+              "parsed": {
+                "workload": "mem_json",
+                "records": 50000,
+                "json_bytes": 6656237,
+                "in_python_ms": 172.935,
+                "checksum": 24858825
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 7,
+              "is_cold": false
+            }
+          ]
+        }
+      },
+      "command_template": "/usr/local/bin/python3 - < <snippet>"
+    },
+    "ax_ssh_warm_direct": {
+      "mode": "ax_ssh_warm_direct",
+      "env_wall_ms": 324.16,
+      "env": {
+        "python_version": "3.12.16 (main, Nov  5 2026, 08:06:14) [GCC 14.2.0]",
+        "executable": "/usr/local/bin/python3",
+        "platform": "Linux-4.19.0-gvisor-aarch64-with-glibc2.41",
+        "system": "Linux",
+        "machine": "aarch64",
+        "hostname": "actor",
+        "cpu_count": 2,
+        "pid": 9,
+        "cwd": "/workspace",
+        "os_release": "PRETTY_NAME=\"Debian GNU/Linux 13 (trixie)\""
+      },
+      "workloads": {
+        "noop": {
+          "iterations": 7,
+          "checksums": [
+            "1"
+          ],
+          "cold_run": {
+            "wall_ms": 105.621,
+            "in_python_ms": 0.00175,
+            "overhead_ms": 105.62
+          },
+          "all_runs_summary": {
+            "wall": {
+              "count": 7,
+              "min_ms": 105.621,
+              "median_ms": 133.838,
+              "mean_ms": 130.639,
+              "max_ms": 154.983,
+              "stdev_ms": 18.073
+            },
+            "in_python": {
+              "count": 7,
+              "min_ms": 0.0,
+              "median_ms": 0.0,
+              "mean_ms": 0.001,
+              "max_ms": 0.002,
+              "stdev_ms": 0.001
+            },
+            "overhead": {
+              "count": 7,
+              "min_ms": 105.62,
+              "median_ms": 133.835,
+              "mean_ms": 130.638,
+              "max_ms": 154.983,
+              "stdev_ms": 18.073
+            }
+          },
+          "warm_runs_summary": {
+            "wall": {
+              "count": 6,
+              "min_ms": 110.959,
+              "median_ms": 136.856,
+              "mean_ms": 134.809,
+              "max_ms": 154.983,
+              "stdev_ms": 15.681
+            },
+            "in_python": {
+              "count": 6,
+              "min_ms": 0.0,
+              "median_ms": 0.0,
+              "mean_ms": 0.001,
+              "max_ms": 0.002,
+              "stdev_ms": 0.001
+            },
+            "overhead": {
+              "count": 6,
+              "min_ms": 110.958,
+              "median_ms": 136.855,
+              "mean_ms": 134.808,
+              "max_ms": 154.983,
+              "stdev_ms": 15.682
+            }
+          },
+          "runs": [
+            {
+              "returncode": 0,
+              "wall_ms": 105.621,
+              "in_python_ms": 0.00175,
+              "overhead_ms": 105.62,
+              "parsed": {
+                "workload": "noop",
+                "in_python_ms": 0.00175,
+                "checksum": 1
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 1,
+              "is_cold": true
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 133.838,
+              "in_python_ms": 0.002416,
+              "overhead_ms": 133.835,
+              "parsed": {
+                "workload": "noop",
+                "in_python_ms": 0.002416,
+                "checksum": 1
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 2,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 139.874,
+              "in_python_ms": 0.000417,
+              "overhead_ms": 139.874,
+              "parsed": {
+                "workload": "noop",
+                "in_python_ms": 0.000417,
+                "checksum": 1
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 3,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 110.959,
+              "in_python_ms": 0.000625,
+              "overhead_ms": 110.958,
+              "parsed": {
+                "workload": "noop",
+                "in_python_ms": 0.000625,
+                "checksum": 1
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 4,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 123.945,
+              "in_python_ms": 0.000292,
+              "overhead_ms": 123.945,
+              "parsed": {
+                "workload": "noop",
+                "in_python_ms": 0.000292,
+                "checksum": 1
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 5,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 154.983,
+              "in_python_ms": 0.000166,
+              "overhead_ms": 154.983,
+              "parsed": {
+                "workload": "noop",
+                "in_python_ms": 0.000166,
+                "checksum": 1
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 6,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 145.254,
+              "in_python_ms": 0.000292,
+              "overhead_ms": 145.253,
+              "parsed": {
+                "workload": "noop",
+                "in_python_ms": 0.000292,
+                "checksum": 1
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 7,
+              "is_cold": false
+            }
+          ]
+        },
+        "cpu_sieve": {
+          "iterations": 7,
+          "checksums": [
+            "838596693108"
+          ],
+          "cold_run": {
+            "wall_ms": 248.296,
+            "in_python_ms": 92.879,
+            "overhead_ms": 155.417
+          },
+          "all_runs_summary": {
+            "wall": {
+              "count": 7,
+              "min_ms": 212.98,
+              "median_ms": 229.821,
+              "mean_ms": 229.193,
+              "max_ms": 248.296,
+              "stdev_ms": 11.271
+            },
+            "in_python": {
+              "count": 7,
+              "min_ms": 85.46,
+              "median_ms": 90.702,
+              "mean_ms": 90.375,
+              "max_ms": 94.297,
+              "stdev_ms": 3.443
+            },
+            "overhead": {
+              "count": 7,
+              "min_ms": 127.52,
+              "median_ms": 139.337,
+              "mean_ms": 138.818,
+              "max_ms": 155.417,
+              "stdev_ms": 9.528
+            }
+          },
+          "warm_runs_summary": {
+            "wall": {
+              "count": 6,
+              "min_ms": 212.98,
+              "median_ms": 228.876,
+              "mean_ms": 226.009,
+              "max_ms": 235.735,
+              "stdev_ms": 8.204
+            },
+            "in_python": {
+              "count": 6,
+              "min_ms": 85.46,
+              "median_ms": 90.603,
+              "mean_ms": 89.958,
+              "max_ms": 94.297,
+              "stdev_ms": 3.572
+            },
+            "overhead": {
+              "count": 6,
+              "min_ms": 127.52,
+              "median_ms": 137.233,
+              "mean_ms": 136.051,
+              "max_ms": 143.839,
+              "stdev_ms": 6.681
+            }
+          },
+          "runs": [
+            {
+              "returncode": 0,
+              "wall_ms": 248.296,
+              "in_python_ms": 92.879,
+              "overhead_ms": 155.417,
+              "parsed": {
+                "workload": "cpu_sieve",
+                "n": 5000000,
+                "in_python_ms": 92.879,
+                "prime_count": 348513,
+                "checksum": 838596693108
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 1,
+              "is_cold": true
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 227.932,
+              "in_python_ms": 92.802,
+              "overhead_ms": 135.13,
+              "parsed": {
+                "workload": "cpu_sieve",
+                "n": 5000000,
+                "in_python_ms": 92.802,
+                "prime_count": 348513,
+                "checksum": 838596693108
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 2,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 229.842,
+              "in_python_ms": 90.505,
+              "overhead_ms": 139.337,
+              "parsed": {
+                "workload": "cpu_sieve",
+                "n": 5000000,
+                "in_python_ms": 90.505,
+                "prime_count": 348513,
+                "checksum": 838596693108
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 3,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 219.745,
+              "in_python_ms": 90.702,
+              "overhead_ms": 129.043,
+              "parsed": {
+                "workload": "cpu_sieve",
+                "n": 5000000,
+                "in_python_ms": 90.702,
+                "prime_count": 348513,
+                "checksum": 838596693108
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 4,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 212.98,
+              "in_python_ms": 85.46,
+              "overhead_ms": 127.52,
+              "parsed": {
+                "workload": "cpu_sieve",
+                "n": 5000000,
+                "in_python_ms": 85.46,
+                "prime_count": 348513,
+                "checksum": 838596693108
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 5,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 229.821,
+              "in_python_ms": 85.982,
+              "overhead_ms": 143.839,
+              "parsed": {
+                "workload": "cpu_sieve",
+                "n": 5000000,
+                "in_python_ms": 85.982,
+                "prime_count": 348513,
+                "checksum": 838596693108
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 6,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 235.735,
+              "in_python_ms": 94.297,
+              "overhead_ms": 141.438,
+              "parsed": {
+                "workload": "cpu_sieve",
+                "n": 5000000,
+                "in_python_ms": 94.297,
+                "prime_count": 348513,
+                "checksum": 838596693108
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 7,
+              "is_cold": false
+            }
+          ]
+        },
+        "cpu_math": {
+          "iterations": 7,
+          "checksums": [
+            "13.662401"
+          ],
+          "cold_run": {
+            "wall_ms": 317.985,
+            "in_python_ms": 202.462,
+            "overhead_ms": 115.523
+          },
+          "all_runs_summary": {
+            "wall": {
+              "count": 7,
+              "min_ms": 308.002,
+              "median_ms": 325.489,
+              "mean_ms": 332.132,
+              "max_ms": 394.046,
+              "stdev_ms": 29.378
+            },
+            "in_python": {
+              "count": 7,
+              "min_ms": 185.719,
+              "median_ms": 188.207,
+              "mean_ms": 199.829,
+              "max_ms": 254.825,
+              "stdev_ms": 24.885
+            },
+            "overhead": {
+              "count": 7,
+              "min_ms": 115.523,
+              "median_ms": 137.692,
+              "mean_ms": 132.303,
+              "max_ms": 150.996,
+              "stdev_ms": 12.496
+            }
+          },
+          "warm_runs_summary": {
+            "wall": {
+              "count": 6,
+              "min_ms": 308.002,
+              "median_ms": 327.523,
+              "mean_ms": 334.49,
+              "max_ms": 394.046,
+              "stdev_ms": 31.448
+            },
+            "in_python": {
+              "count": 6,
+              "min_ms": 185.719,
+              "median_ms": 188.193,
+              "mean_ms": 199.39,
+              "max_ms": 254.825,
+              "stdev_ms": 27.231
+            },
+            "overhead": {
+              "count": 6,
+              "min_ms": 122.283,
+              "median_ms": 137.817,
+              "mean_ms": 135.1,
+              "max_ms": 150.996,
+              "stdev_ms": 11.031
+            }
+          },
+          "runs": [
+            {
+              "returncode": 0,
+              "wall_ms": 317.985,
+              "in_python_ms": 202.462,
+              "overhead_ms": 115.523,
+              "parsed": {
+                "workload": "cpu_math",
+                "iters": 1500000,
+                "in_python_ms": 202.462,
+                "checksum": 13.662401
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 1,
+              "is_cold": true
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 325.489,
+              "in_python_ms": 187.546,
+              "overhead_ms": 137.943,
+              "parsed": {
+                "workload": "cpu_math",
+                "iters": 1500000,
+                "in_python_ms": 187.546,
+                "checksum": 13.662401
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 2,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 310.641,
+              "in_python_ms": 188.179,
+              "overhead_ms": 122.462,
+              "parsed": {
+                "workload": "cpu_math",
+                "iters": 1500000,
+                "in_python_ms": 188.179,
+                "checksum": 13.662401
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 3,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 394.046,
+              "in_python_ms": 254.825,
+              "overhead_ms": 139.221,
+              "parsed": {
+                "workload": "cpu_math",
+                "iters": 1500000,
+                "in_python_ms": 254.825,
+                "checksum": 13.662401
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 4,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 329.557,
+              "in_python_ms": 191.865,
+              "overhead_ms": 137.692,
+              "parsed": {
+                "workload": "cpu_math",
+                "iters": 1500000,
+                "in_python_ms": 191.865,
+                "checksum": 13.662401
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 5,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 339.203,
+              "in_python_ms": 188.207,
+              "overhead_ms": 150.996,
+              "parsed": {
+                "workload": "cpu_math",
+                "iters": 1500000,
+                "in_python_ms": 188.207,
+                "checksum": 13.662401
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 6,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 308.002,
+              "in_python_ms": 185.719,
+              "overhead_ms": 122.283,
+              "parsed": {
+                "workload": "cpu_math",
+                "iters": 1500000,
+                "in_python_ms": 185.719,
+                "checksum": 13.662401
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 7,
+              "is_cold": false
+            }
+          ]
+        },
+        "mem_json": {
+          "iterations": 7,
+          "checksums": [
+            "24858825"
+          ],
+          "cold_run": {
+            "wall_ms": 341.384,
+            "in_python_ms": 168.511,
+            "overhead_ms": 172.873
+          },
+          "all_runs_summary": {
+            "wall": {
+              "count": 7,
+              "min_ms": 336.878,
+              "median_ms": 347.564,
+              "mean_ms": 362.654,
+              "max_ms": 423.769,
+              "stdev_ms": 31.822
+            },
+            "in_python": {
+              "count": 7,
+              "min_ms": 146.714,
+              "median_ms": 169.094,
+              "mean_ms": 176.477,
+              "max_ms": 217.853,
+              "stdev_ms": 22.204
+            },
+            "overhead": {
+              "count": 7,
+              "min_ms": 171.698,
+              "median_ms": 183.802,
+              "mean_ms": 186.177,
+              "max_ms": 205.916,
+              "stdev_ms": 13.111
+            }
+          },
+          "warm_runs_summary": {
+            "wall": {
+              "count": 6,
+              "min_ms": 336.878,
+              "median_ms": 358.155,
+              "mean_ms": 366.199,
+              "max_ms": 423.769,
+              "stdev_ms": 33.31
+            },
+            "in_python": {
+              "count": 6,
+              "min_ms": 146.714,
+              "median_ms": 176.069,
+              "mean_ms": 177.805,
+              "max_ms": 217.853,
+              "stdev_ms": 24.017
+            },
+            "overhead": {
+              "count": 6,
+              "min_ms": 171.698,
+              "median_ms": 187.728,
+              "mean_ms": 188.395,
+              "max_ms": 205.916,
+              "stdev_ms": 12.844
+            }
+          },
+          "runs": [
+            {
+              "returncode": 0,
+              "wall_ms": 341.384,
+              "in_python_ms": 168.511,
+              "overhead_ms": 172.873,
+              "parsed": {
+                "workload": "mem_json",
+                "records": 50000,
+                "json_bytes": 6656237,
+                "in_python_ms": 168.511,
+                "checksum": 24858825
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 1,
+              "is_cold": true
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 336.878,
+              "in_python_ms": 165.18,
+              "overhead_ms": 171.698,
+              "parsed": {
+                "workload": "mem_json",
+                "records": 50000,
+                "json_bytes": 6656237,
+                "in_python_ms": 165.18,
+                "checksum": 24858825
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 2,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 347.564,
+              "in_python_ms": 169.094,
+              "overhead_ms": 178.47,
+              "parsed": {
+                "workload": "mem_json",
+                "records": 50000,
+                "json_bytes": 6656237,
+                "in_python_ms": 169.094,
+                "checksum": 24858825
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 3,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 381.87,
+              "in_python_ms": 183.043,
+              "overhead_ms": 198.827,
+              "parsed": {
+                "workload": "mem_json",
+                "records": 50000,
+                "json_bytes": 6656237,
+                "in_python_ms": 183.043,
+                "checksum": 24858825
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 4,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 338.369,
+              "in_python_ms": 146.714,
+              "overhead_ms": 191.655,
+              "parsed": {
+                "workload": "mem_json",
+                "records": 50000,
+                "json_bytes": 6656237,
+                "in_python_ms": 146.714,
+                "checksum": 24858825
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 5,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 423.769,
+              "in_python_ms": 217.853,
+              "overhead_ms": 205.916,
+              "parsed": {
+                "workload": "mem_json",
+                "records": 50000,
+                "json_bytes": 6656237,
+                "in_python_ms": 217.853,
+                "checksum": 24858825
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 6,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 368.746,
+              "in_python_ms": 184.944,
+              "overhead_ms": 183.802,
+              "parsed": {
+                "workload": "mem_json",
+                "records": 50000,
+                "json_bytes": 6656237,
+                "in_python_ms": 184.944,
+                "checksum": 24858825
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 7,
+              "is_cold": false
+            }
+          ]
+        }
+      },
+      "command_template": "/Users/jbd/go/bin/ax --server http://127.0.0.1:54380 ssh bench-py-direct -- python3 - < <snippet>",
+      "task_setup": {
+        "apply_ms": 50.304,
+        "resume_ms": 101.325
+      }
+    },
+    "ax_ssh_warm_default": {
+      "mode": "ax_ssh_warm_default",
+      "env_wall_ms": 199.169,
+      "env": {
+        "python_version": "3.12.16 (main, Nov  5 2026, 08:06:14) [GCC 14.2.0]",
+        "executable": "/usr/local/bin/python3",
+        "platform": "Linux-4.19.0-gvisor-aarch64-with-glibc2.41",
+        "system": "Linux",
+        "machine": "aarch64",
+        "hostname": "actor",
+        "cpu_count": 2,
+        "pid": 9,
+        "cwd": "/workspace",
+        "os_release": "PRETTY_NAME=\"Debian GNU/Linux 13 (trixie)\""
+      },
+      "workloads": {
+        "noop": {
+          "iterations": 7,
+          "checksums": [
+            "1"
+          ],
+          "cold_run": {
+            "wall_ms": 150.201,
+            "in_python_ms": 0.001791,
+            "overhead_ms": 150.199
+          },
+          "all_runs_summary": {
+            "wall": {
+              "count": 7,
+              "min_ms": 111.902,
+              "median_ms": 146.907,
+              "mean_ms": 146.129,
+              "max_ms": 177.248,
+              "stdev_ms": 20.857
+            },
+            "in_python": {
+              "count": 7,
+              "min_ms": 0.0,
+              "median_ms": 0.0,
+              "mean_ms": 0.001,
+              "max_ms": 0.004,
+              "stdev_ms": 0.001
+            },
+            "overhead": {
+              "count": 7,
+              "min_ms": 111.902,
+              "median_ms": 146.907,
+              "mean_ms": 146.127,
+              "max_ms": 177.245,
+              "stdev_ms": 20.856
+            }
+          },
+          "warm_runs_summary": {
+            "wall": {
+              "count": 6,
+              "min_ms": 111.902,
+              "median_ms": 141.963,
+              "mean_ms": 145.45,
+              "max_ms": 177.248,
+              "stdev_ms": 22.763
+            },
+            "in_python": {
+              "count": 6,
+              "min_ms": 0.0,
+              "median_ms": 0.0,
+              "mean_ms": 0.001,
+              "max_ms": 0.004,
+              "stdev_ms": 0.001
+            },
+            "overhead": {
+              "count": 6,
+              "min_ms": 111.902,
+              "median_ms": 141.962,
+              "mean_ms": 145.449,
+              "max_ms": 177.245,
+              "stdev_ms": 22.762
+            }
+          },
+          "runs": [
+            {
+              "returncode": 0,
+              "wall_ms": 150.201,
+              "in_python_ms": 0.001791,
+              "overhead_ms": 150.199,
+              "parsed": {
+                "workload": "noop",
+                "in_python_ms": 0.001791,
+                "checksum": 1
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 1,
+              "is_cold": true
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 137.019,
+              "in_python_ms": 0.002042,
+              "overhead_ms": 137.017,
+              "parsed": {
+                "workload": "noop",
+                "in_python_ms": 0.002042,
+                "checksum": 1
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 2,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 177.248,
+              "in_python_ms": 0.0035,
+              "overhead_ms": 177.245,
+              "parsed": {
+                "workload": "noop",
+                "in_python_ms": 0.0035,
+                "checksum": 1
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 3,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 146.907,
+              "in_python_ms": 0.000292,
+              "overhead_ms": 146.907,
+              "parsed": {
+                "workload": "noop",
+                "in_python_ms": 0.000292,
+                "checksum": 1
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 4,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 162.904,
+              "in_python_ms": 0.000458,
+              "overhead_ms": 162.904,
+              "parsed": {
+                "workload": "noop",
+                "in_python_ms": 0.000458,
+                "checksum": 1
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 5,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 136.719,
+              "in_python_ms": 0.000333,
+              "overhead_ms": 136.718,
+              "parsed": {
+                "workload": "noop",
+                "in_python_ms": 0.000333,
+                "checksum": 1
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 6,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 111.902,
+              "in_python_ms": 0.000291,
+              "overhead_ms": 111.902,
+              "parsed": {
+                "workload": "noop",
+                "in_python_ms": 0.000291,
+                "checksum": 1
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 7,
+              "is_cold": false
+            }
+          ]
+        },
+        "cpu_sieve": {
+          "iterations": 7,
+          "checksums": [
+            "838596693108"
+          ],
+          "cold_run": {
+            "wall_ms": 265.322,
+            "in_python_ms": 100.142,
+            "overhead_ms": 165.18
+          },
+          "all_runs_summary": {
+            "wall": {
+              "count": 7,
+              "min_ms": 221.199,
+              "median_ms": 236.878,
+              "mean_ms": 238.206,
+              "max_ms": 265.322,
+              "stdev_ms": 15.837
+            },
+            "in_python": {
+              "count": 7,
+              "min_ms": 88.403,
+              "median_ms": 95.075,
+              "mean_ms": 95.716,
+              "max_ms": 108.364,
+              "stdev_ms": 7.004
+            },
+            "overhead": {
+              "count": 7,
+              "min_ms": 124.271,
+              "median_ms": 142.033,
+              "mean_ms": 142.49,
+              "max_ms": 165.18,
+              "stdev_ms": 12.75
+            }
+          },
+          "warm_runs_summary": {
+            "wall": {
+              "count": 6,
+              "min_ms": 221.199,
+              "median_ms": 235.458,
+              "mean_ms": 233.686,
+              "max_ms": 251.428,
+              "stdev_ms": 11.375
+            },
+            "in_python": {
+              "count": 6,
+              "min_ms": 88.403,
+              "median_ms": 93.54,
+              "mean_ms": 94.978,
+              "max_ms": 108.364,
+              "stdev_ms": 7.368
+            },
+            "overhead": {
+              "count": 6,
+              "min_ms": 124.271,
+              "median_ms": 141.918,
+              "mean_ms": 138.708,
+              "max_ms": 148.283,
+              "stdev_ms": 8.656
+            }
+          },
+          "runs": [
+            {
+              "returncode": 0,
+              "wall_ms": 265.322,
+              "in_python_ms": 100.142,
+              "overhead_ms": 165.18,
+              "parsed": {
+                "workload": "cpu_sieve",
+                "n": 5000000,
+                "in_python_ms": 100.142,
+                "prime_count": 348513,
+                "checksum": 838596693108
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 1,
+              "is_cold": true
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 251.428,
+              "in_python_ms": 108.364,
+              "overhead_ms": 143.064,
+              "parsed": {
+                "workload": "cpu_sieve",
+                "n": 5000000,
+                "in_python_ms": 108.364,
+                "prime_count": 348513,
+                "checksum": 838596693108
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 2,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 236.878,
+              "in_python_ms": 95.075,
+              "overhead_ms": 141.803,
+              "parsed": {
+                "workload": "cpu_sieve",
+                "n": 5000000,
+                "in_python_ms": 95.075,
+                "prime_count": 348513,
+                "checksum": 838596693108
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 3,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 237.265,
+              "in_python_ms": 88.982,
+              "overhead_ms": 148.283,
+              "parsed": {
+                "workload": "cpu_sieve",
+                "n": 5000000,
+                "in_python_ms": 88.982,
+                "prime_count": 348513,
+                "checksum": 838596693108
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 4,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 234.038,
+              "in_python_ms": 92.005,
+              "overhead_ms": 142.033,
+              "parsed": {
+                "workload": "cpu_sieve",
+                "n": 5000000,
+                "in_python_ms": 92.005,
+                "prime_count": 348513,
+                "checksum": 838596693108
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 5,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 221.199,
+              "in_python_ms": 88.403,
+              "overhead_ms": 132.796,
+              "parsed": {
+                "workload": "cpu_sieve",
+                "n": 5000000,
+                "in_python_ms": 88.403,
+                "prime_count": 348513,
+                "checksum": 838596693108
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 6,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 221.31,
+              "in_python_ms": 97.039,
+              "overhead_ms": 124.271,
+              "parsed": {
+                "workload": "cpu_sieve",
+                "n": 5000000,
+                "in_python_ms": 97.039,
+                "prime_count": 348513,
+                "checksum": 838596693108
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 7,
+              "is_cold": false
+            }
+          ]
+        },
+        "cpu_math": {
+          "iterations": 7,
+          "checksums": [
+            "13.662401"
+          ],
+          "cold_run": {
+            "wall_ms": 326.4,
+            "in_python_ms": 182.705,
+            "overhead_ms": 143.695
+          },
+          "all_runs_summary": {
+            "wall": {
+              "count": 7,
+              "min_ms": 307.356,
+              "median_ms": 333.248,
+              "mean_ms": 335.847,
+              "max_ms": 370.118,
+              "stdev_ms": 21.014
+            },
+            "in_python": {
+              "count": 7,
+              "min_ms": 182.705,
+              "median_ms": 187.64,
+              "mean_ms": 190.568,
+              "max_ms": 209.798,
+              "stdev_ms": 9.46
+            },
+            "overhead": {
+              "count": 7,
+              "min_ms": 124.371,
+              "median_ms": 143.695,
+              "mean_ms": 145.28,
+              "max_ms": 162.685,
+              "stdev_ms": 13.404
+            }
+          },
+          "warm_runs_summary": {
+            "wall": {
+              "count": 6,
+              "min_ms": 307.356,
+              "median_ms": 333.481,
+              "mean_ms": 337.422,
+              "max_ms": 370.118,
+              "stdev_ms": 22.563
+            },
+            "in_python": {
+              "count": 6,
+              "min_ms": 182.985,
+              "median_ms": 189.805,
+              "mean_ms": 191.878,
+              "max_ms": 209.798,
+              "stdev_ms": 9.642
+            },
+            "overhead": {
+              "count": 6,
+              "min_ms": 124.371,
+              "median_ms": 144.86,
+              "mean_ms": 145.544,
+              "max_ms": 162.685,
+              "stdev_ms": 14.663
+            }
+          },
+          "runs": [
+            {
+              "returncode": 0,
+              "wall_ms": 326.4,
+              "in_python_ms": 182.705,
+              "overhead_ms": 143.695,
+              "parsed": {
+                "workload": "cpu_math",
+                "iters": 1500000,
+                "in_python_ms": 182.705,
+                "checksum": 13.662401
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 1,
+              "is_cold": true
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 307.356,
+              "in_python_ms": 182.985,
+              "overhead_ms": 124.371,
+              "parsed": {
+                "workload": "cpu_math",
+                "iters": 1500000,
+                "in_python_ms": 182.985,
+                "checksum": 13.662401
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 2,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 323.806,
+              "in_python_ms": 187.64,
+              "overhead_ms": 136.166,
+              "parsed": {
+                "workload": "cpu_math",
+                "iters": 1500000,
+                "in_python_ms": 187.64,
+                "checksum": 13.662401
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 3,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 356.289,
+              "in_python_ms": 193.604,
+              "overhead_ms": 162.685,
+              "parsed": {
+                "workload": "cpu_math",
+                "iters": 1500000,
+                "in_python_ms": 193.604,
+                "checksum": 13.662401
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 4,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 333.248,
+              "in_python_ms": 191.971,
+              "overhead_ms": 141.277,
+              "parsed": {
+                "workload": "cpu_math",
+                "iters": 1500000,
+                "in_python_ms": 191.971,
+                "checksum": 13.662401
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 5,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 370.118,
+              "in_python_ms": 209.798,
+              "overhead_ms": 160.32,
+              "parsed": {
+                "workload": "cpu_math",
+                "iters": 1500000,
+                "in_python_ms": 209.798,
+                "checksum": 13.662401
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 6,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 333.715,
+              "in_python_ms": 185.272,
+              "overhead_ms": 148.443,
+              "parsed": {
+                "workload": "cpu_math",
+                "iters": 1500000,
+                "in_python_ms": 185.272,
+                "checksum": 13.662401
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 7,
+              "is_cold": false
+            }
+          ]
+        },
+        "mem_json": {
+          "iterations": 7,
+          "checksums": [
+            "24858825"
+          ],
+          "cold_run": {
+            "wall_ms": 378.32,
+            "in_python_ms": 176.217,
+            "overhead_ms": 202.103
+          },
+          "all_runs_summary": {
+            "wall": {
+              "count": 7,
+              "min_ms": 318.148,
+              "median_ms": 378.32,
+              "mean_ms": 404.184,
+              "max_ms": 590.938,
+              "stdev_ms": 90.7
+            },
+            "in_python": {
+              "count": 7,
+              "min_ms": 140.451,
+              "median_ms": 176.217,
+              "mean_ms": 212.984,
+              "max_ms": 400.894,
+              "stdev_ms": 88.835
+            },
+            "overhead": {
+              "count": 7,
+              "min_ms": 177.697,
+              "median_ms": 190.044,
+              "mean_ms": 191.2,
+              "max_ms": 202.103,
+              "stdev_ms": 8.849
+            }
+          },
+          "warm_runs_summary": {
+            "wall": {
+              "count": 6,
+              "min_ms": 318.148,
+              "median_ms": 371.491,
+              "mean_ms": 408.495,
+              "max_ms": 590.938,
+              "stdev_ms": 98.568
+            },
+            "in_python": {
+              "count": 6,
+              "min_ms": 140.451,
+              "median_ms": 179.125,
+              "mean_ms": 219.112,
+              "max_ms": 400.894,
+              "stdev_ms": 95.68
+            },
+            "overhead": {
+              "count": 6,
+              "min_ms": 177.697,
+              "median_ms": 188.368,
+              "mean_ms": 189.383,
+              "max_ms": 199.749,
+              "stdev_ms": 8.138
+            }
+          },
+          "runs": [
+            {
+              "returncode": 0,
+              "wall_ms": 378.32,
+              "in_python_ms": 176.217,
+              "overhead_ms": 202.103,
+              "parsed": {
+                "workload": "mem_json",
+                "records": 50000,
+                "json_bytes": 6656237,
+                "in_python_ms": 176.217,
+                "checksum": 24858825
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 1,
+              "is_cold": true
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 384.966,
+              "in_python_ms": 185.217,
+              "overhead_ms": 199.749,
+              "parsed": {
+                "workload": "mem_json",
+                "records": 50000,
+                "json_bytes": 6656237,
+                "in_python_ms": 185.217,
+                "checksum": 24858825
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 2,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 358.017,
+              "in_python_ms": 173.034,
+              "overhead_ms": 184.983,
+              "parsed": {
+                "workload": "mem_json",
+                "records": 50000,
+                "json_bytes": 6656237,
+                "in_python_ms": 173.034,
+                "checksum": 24858825
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 3,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 318.148,
+              "in_python_ms": 140.451,
+              "overhead_ms": 177.697,
+              "parsed": {
+                "workload": "mem_json",
+                "records": 50000,
+                "json_bytes": 6656237,
+                "in_python_ms": 140.451,
+                "checksum": 24858825
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 4,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 443.41,
+              "in_python_ms": 246.274,
+              "overhead_ms": 197.136,
+              "parsed": {
+                "workload": "mem_json",
+                "records": 50000,
+                "json_bytes": 6656237,
+                "in_python_ms": 246.274,
+                "checksum": 24858825
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 5,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 590.938,
+              "in_python_ms": 400.894,
+              "overhead_ms": 190.044,
+              "parsed": {
+                "workload": "mem_json",
+                "records": 50000,
+                "json_bytes": 6656237,
+                "in_python_ms": 400.894,
+                "checksum": 24858825
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 6,
+              "is_cold": false
+            },
+            {
+              "returncode": 0,
+              "wall_ms": 355.491,
+              "in_python_ms": 168.8,
+              "overhead_ms": 186.691,
+              "parsed": {
+                "workload": "mem_json",
+                "records": 50000,
+                "json_bytes": 6656237,
+                "in_python_ms": 168.8,
+                "checksum": 24858825
+              },
+              "stderr": "",
+              "parse_error": null,
+              "iteration": 7,
+              "is_cold": false
+            }
+          ]
+        }
+      },
+      "command_template": "/Users/jbd/go/bin/ax ssh bench-py-default -- python3 - < <snippet>",
+      "task_setup": {
+        "apply_ms": 36.7,
+        "resume_ms": 128.022
+      }
+    },
+    "ax_suspend_resume_direct": {
+      "mode": "ax_suspend_resume_direct",
+      "workload": "noop",
+      "iterations": 5,
+      "checksums": [
+        "1"
+      ],
+      "command_flow": "/Users/jbd/go/bin/ax --server http://127.0.0.1:54380 suspend task bench-py-sr -> resume -> ssh -- python3 -",
+      "summary": {
+        "suspend": {
+          "count": 5,
+          "min_ms": 90.295,
+          "median_ms": 96.932,
+          "mean_ms": 105.046,
+          "max_ms": 141.444,
+          "stdev_ms": 20.856
+        },
+        "resume": {
+          "count": 5,
+          "min_ms": 98.574,
+          "median_ms": 105.647,
+          "mean_ms": 110.926,
+          "max_ms": 138.531,
+          "stdev_ms": 16.161
+        },
+        "ssh_wall": {
+          "count": 5,
+          "min_ms": 115.906,
+          "median_ms": 129.038,
+          "mean_ms": 160.74,
+          "max_ms": 306.768,
+          "stdev_ms": 82.012
+        },
+        "in_python": {
+          "count": 5,
+          "min_ms": 0.002,
+          "median_ms": 0.002,
+          "mean_ms": 0.003,
+          "max_ms": 0.005,
+          "stdev_ms": 0.002
+        },
+        "resume_and_exec": {
+          "count": 5,
+          "min_ms": 216.888,
+          "median_ms": 233.397,
+          "mean_ms": 271.905,
+          "max_ms": 412.915,
+          "stdev_ms": 81.067
+        },
+        "full_cycle": {
+          "count": 5,
+          "min_ms": 310.693,
+          "median_ms": 331.338,
+          "mean_ms": 376.95,
+          "max_ms": 503.21,
+          "stdev_ms": 80.038
+        }
+      },
+      "runs": [
+        {
+          "iteration": 1,
+          "returncode": 0,
+          "suspend_ms": 90.295,
+          "resume_ms": 105.647,
+          "ssh_wall_ms": 306.768,
+          "ssh_retries": 0,
+          "in_python_ms": 0.004042,
+          "resume_and_exec_ms": 412.915,
+          "full_cycle_ms": 503.21,
+          "parsed": {
+            "workload": "noop",
+            "in_python_ms": 0.004042,
+            "checksum": 1
+          }
+        },
+        {
+          "iteration": 2,
+          "returncode": 0,
+          "suspend_ms": 141.444,
+          "resume_ms": 138.531,
+          "ssh_wall_ms": 129.038,
+          "ssh_retries": 0,
+          "in_python_ms": 0.002292,
+          "resume_and_exec_ms": 267.738,
+          "full_cycle_ms": 409.182,
+          "parsed": {
+            "workload": "noop",
+            "in_python_ms": 0.002292,
+            "checksum": 1
+          }
+        },
+        {
+          "iteration": 3,
+          "returncode": 0,
+          "suspend_ms": 102.752,
+          "resume_ms": 111.065,
+          "ssh_wall_ms": 117.342,
+          "ssh_retries": 0,
+          "in_python_ms": 0.002,
+          "resume_and_exec_ms": 228.586,
+          "full_cycle_ms": 331.338,
+          "parsed": {
+            "workload": "noop",
+            "in_python_ms": 0.002,
+            "checksum": 1
+          }
+        },
+        {
+          "iteration": 4,
+          "returncode": 0,
+          "suspend_ms": 96.932,
+          "resume_ms": 98.574,
+          "ssh_wall_ms": 134.645,
+          "ssh_retries": 0,
+          "in_python_ms": 0.0055,
+          "resume_and_exec_ms": 233.397,
+          "full_cycle_ms": 330.329,
+          "parsed": {
+            "workload": "noop",
+            "in_python_ms": 0.0055,
+            "checksum": 1
+          }
+        },
+        {
+          "iteration": 5,
+          "returncode": 0,
+          "suspend_ms": 93.805,
+          "resume_ms": 100.815,
+          "ssh_wall_ms": 115.906,
+          "ssh_retries": 0,
+          "in_python_ms": 0.001833,
+          "resume_and_exec_ms": 216.888,
+          "full_cycle_ms": 310.693,
+          "parsed": {
+            "workload": "noop",
+            "in_python_ms": 0.001833,
+            "checksum": 1
+          }
+        }
+      ]
+    },
+    "ax_cold_lifecycle_direct": {
+      "mode": "ax_cold_lifecycle_direct",
+      "use_direct_server": true,
+      "command_flow": "/Users/jbd/go/bin/ax --server http://127.0.0.1:54380 apply -f - -> resume -> ssh -- python3 - -> delete",
+      "workloads": {
+        "noop": {
+          "iterations": 5,
+          "checksums": [
+            "1"
+          ],
+          "summary": {
+            "apply": {
+              "count": 5,
+              "min_ms": 30.635,
+              "median_ms": 43.825,
+              "mean_ms": 54.668,
+              "max_ms": 105.301,
+              "stdev_ms": 29.424
+            },
+            "resume": {
+              "count": 5,
+              "min_ms": 83.826,
+              "median_ms": 91.192,
+              "mean_ms": 96.242,
+              "max_ms": 126.475,
+              "stdev_ms": 17.222
+            },
+            "ssh_wall": {
+              "count": 5,
+              "min_ms": 139.445,
+              "median_ms": 176.591,
+              "mean_ms": 167.906,
+              "max_ms": 187.542,
+              "stdev_ms": 19.16
+            },
+            "in_python": {
+              "count": 5,
+              "min_ms": 0.002,
+              "median_ms": 0.002,
+              "mean_ms": 0.003,
+              "max_ms": 0.005,
+              "stdev_ms": 0.002
+            },
+            "cold_exec_total": {
+              "count": 5,
+              "min_ms": 264.021,
+              "median_ms": 317.431,
+              "mean_ms": 319.091,
+              "max_ms": 358.151,
+              "stdev_ms": 39.274
+            },
+            "cold_overhead": {
+              "count": 5,
+              "min_ms": 264.019,
+              "median_ms": 317.425,
+              "mean_ms": 319.088,
+              "max_ms": 358.149,
+              "stdev_ms": 39.274
+            },
+            "delete": {
+              "count": 5,
+              "min_ms": 39.26,
+              "median_ms": 43.082,
+              "mean_ms": 45.924,
+              "max_ms": 53.907,
+              "stdev_ms": 6.374
+            },
+            "full_lifecycle": {
+              "count": 5,
+              "min_ms": 303.311,
+              "median_ms": 360.547,
+              "mean_ms": 365.054,
+              "max_ms": 412.113,
+              "stdev_ms": 45.394
+            }
+          },
+          "runs": [
+            {
+              "iteration": 1,
+              "task_name": "bench-cold-noop-1",
+              "returncode": 0,
+              "apply_ms": 30.635,
+              "resume_ms": 92.221,
+              "ssh_wall_ms": 177.91,
+              "ssh_retries": 0,
+              "in_python_ms": 0.002125,
+              "cold_exec_total_ms": 300.975,
+              "cold_overhead_ms": 300.973,
+              "delete_ms": 41.935,
+              "full_lifecycle_ms": 342.939,
+              "parsed": {
+                "workload": "noop",
+                "in_python_ms": 0.002125,
+                "checksum": 1
+              }
+            },
+            {
+              "iteration": 2,
+              "task_name": "bench-cold-noop-2",
+              "returncode": 0,
+              "apply_ms": 40.457,
+              "resume_ms": 83.826,
+              "ssh_wall_ms": 139.445,
+              "ssh_retries": 0,
+              "in_python_ms": 0.002125,
+              "cold_exec_total_ms": 264.021,
+              "cold_overhead_ms": 264.019,
+              "delete_ms": 39.26,
+              "full_lifecycle_ms": 303.311,
+              "parsed": {
+                "workload": "noop",
+                "in_python_ms": 0.002125,
+                "checksum": 1
+              }
+            },
+            {
+              "iteration": 3,
+              "task_name": "bench-cold-noop-3",
+              "returncode": 0,
+              "apply_ms": 105.301,
+              "resume_ms": 91.192,
+              "ssh_wall_ms": 158.042,
+              "ssh_retries": 0,
+              "in_python_ms": 0.002,
+              "cold_exec_total_ms": 354.875,
+              "cold_overhead_ms": 354.873,
+              "delete_ms": 51.438,
+              "full_lifecycle_ms": 406.362,
+              "parsed": {
+                "workload": "noop",
+                "in_python_ms": 0.002,
+                "checksum": 1
+              }
+            },
+            {
+              "iteration": 4,
+              "task_name": "bench-cold-noop-4",
+              "returncode": 0,
+              "apply_ms": 53.123,
+              "resume_ms": 87.496,
+              "ssh_wall_ms": 176.591,
+              "ssh_retries": 0,
+              "in_python_ms": 0.005459,
+              "cold_exec_total_ms": 317.431,
+              "cold_overhead_ms": 317.425,
+              "delete_ms": 43.082,
+              "full_lifecycle_ms": 360.547,
+              "parsed": {
+                "workload": "noop",
+                "in_python_ms": 0.005459,
+                "checksum": 1
+              }
+            },
+            {
+              "iteration": 5,
+              "task_name": "bench-cold-noop-5",
+              "returncode": 0,
+              "apply_ms": 43.825,
+              "resume_ms": 126.475,
+              "ssh_wall_ms": 187.542,
+              "ssh_retries": 0,
+              "in_python_ms": 0.002083,
+              "cold_exec_total_ms": 358.151,
+              "cold_overhead_ms": 358.149,
+              "delete_ms": 53.907,
+              "full_lifecycle_ms": 412.113,
+              "parsed": {
+                "workload": "noop",
+                "in_python_ms": 0.002083,
+                "checksum": 1
+              }
+            }
+          ]
+        },
+        "cpu_sieve": {
+          "iterations": 5,
+          "checksums": [
+            "838596693108"
+          ],
+          "summary": {
+            "apply": {
+              "count": 5,
+              "min_ms": 38.425,
+              "median_ms": 46.262,
+              "mean_ms": 46.12,
+              "max_ms": 53.742,
+              "stdev_ms": 7.386
+            },
+            "resume": {
+              "count": 5,
+              "min_ms": 93.178,
+              "median_ms": 111.856,
+              "mean_ms": 112.714,
+              "max_ms": 134.081,
+              "stdev_ms": 17.266
+            },
+            "ssh_wall": {
+              "count": 5,
+              "min_ms": 266.288,
+              "median_ms": 279.52,
+              "mean_ms": 315.091,
+              "max_ms": 393.756,
+              "stdev_ms": 60.217
+            },
+            "in_python": {
+              "count": 5,
+              "min_ms": 99.204,
+              "median_ms": 110.859,
+              "mean_ms": 110.279,
+              "max_ms": 119.907,
+              "stdev_ms": 7.508
+            },
+            "cold_exec_total": {
+              "count": 5,
+              "min_ms": 398.756,
+              "median_ms": 449.86,
+              "mean_ms": 474.422,
+              "max_ms": 581.571,
+              "stdev_ms": 70.744
+            },
+            "cold_overhead": {
+              "count": 5,
+              "min_ms": 287.897,
+              "median_ms": 350.656,
+              "mean_ms": 364.143,
+              "max_ms": 461.664,
+              "stdev_ms": 67.115
+            },
+            "delete": {
+              "count": 5,
+              "min_ms": 50.846,
+              "median_ms": 66.804,
+              "mean_ms": 68.941,
+              "max_ms": 91.515,
+              "stdev_ms": 14.917
+            },
+            "full_lifecycle": {
+              "count": 5,
+              "min_ms": 449.669,
+              "median_ms": 512.895,
+              "mean_ms": 543.413,
+              "max_ms": 654.18,
+              "stdev_ms": 80.939
+            }
+          },
+          "runs": [
+            {
+              "iteration": 1,
+              "task_name": "bench-cold-cpu-sieve-1",
+              "returncode": 0,
+              "apply_ms": 38.425,
+              "resume_ms": 98.941,
+              "ssh_wall_ms": 366.178,
+              "ssh_retries": 0,
+              "in_python_ms": 108.544,
+              "cold_exec_total_ms": 504.018,
+              "cold_overhead_ms": 395.474,
+              "delete_ms": 91.515,
+              "full_lifecycle_ms": 595.575,
+              "parsed": {
+                "workload": "cpu_sieve",
+                "n": 5000000,
+                "in_python_ms": 108.544,
+                "prime_count": 348513,
+                "checksum": 838596693108
+              }
+            },
+            {
+              "iteration": 2,
+              "task_name": "bench-cold-cpu-sieve-2",
+              "returncode": 0,
+              "apply_ms": 53.187,
+              "resume_ms": 134.081,
+              "ssh_wall_ms": 393.756,
+              "ssh_retries": 0,
+              "in_python_ms": 119.907,
+              "cold_exec_total_ms": 581.571,
+              "cold_overhead_ms": 461.664,
+              "delete_ms": 72.551,
+              "full_lifecycle_ms": 654.18,
+              "parsed": {
+                "workload": "cpu_sieve",
+                "n": 5000000,
+                "in_python_ms": 119.907,
+                "prime_count": 348513,
+                "checksum": 838596693108
+              }
+            },
+            {
+              "iteration": 3,
+              "task_name": "bench-cold-cpu-sieve-3",
+              "returncode": 0,
+              "apply_ms": 46.262,
+              "resume_ms": 111.856,
+              "ssh_wall_ms": 279.52,
+              "ssh_retries": 0,
+              "in_python_ms": 112.882,
+              "cold_exec_total_ms": 437.907,
+              "cold_overhead_ms": 325.025,
+              "delete_ms": 66.804,
+              "full_lifecycle_ms": 504.744,
+              "parsed": {
+                "workload": "cpu_sieve",
+                "n": 5000000,
+                "in_python_ms": 112.882,
+                "prime_count": 348513,
+                "checksum": 838596693108
+              }
+            },
+            {
+              "iteration": 4,
+              "task_name": "bench-cold-cpu-sieve-4",
+              "returncode": 0,
+              "apply_ms": 38.984,
+              "resume_ms": 93.178,
+              "ssh_wall_ms": 266.288,
+              "ssh_retries": 0,
+              "in_python_ms": 110.859,
+              "cold_exec_total_ms": 398.756,
+              "cold_overhead_ms": 287.897,
+              "delete_ms": 50.846,
+              "full_lifecycle_ms": 449.669,
+              "parsed": {
+                "workload": "cpu_sieve",
+                "n": 5000000,
+                "in_python_ms": 110.859,
+                "prime_count": 348513,
+                "checksum": 838596693108
+              }
+            },
+            {
+              "iteration": 5,
+              "task_name": "bench-cold-cpu-sieve-5",
+              "returncode": 0,
+              "apply_ms": 53.742,
+              "resume_ms": 125.513,
+              "ssh_wall_ms": 269.712,
+              "ssh_retries": 0,
+              "in_python_ms": 99.204,
+              "cold_exec_total_ms": 449.86,
+              "cold_overhead_ms": 350.656,
+              "delete_ms": 62.991,
+              "full_lifecycle_ms": 512.895,
+              "parsed": {
+                "workload": "cpu_sieve",
+                "n": 5000000,
+                "in_python_ms": 99.204,
+                "prime_count": 348513,
+                "checksum": 838596693108
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "comparisons_vs_local_arm64": {
+    "ax_ssh_warm_direct": {
+      "noop": {
+        "baseline_warm_wall_med_ms": 29.888,
+        "ax_warm_wall_med_ms": 136.856,
+        "wall_diff_ms": 106.968,
+        "wall_ratio": 4.579,
+        "baseline_in_python_med_ms": 0.0,
+        "ax_in_python_med_ms": 0.0,
+        "in_python_diff_ms": 0.0,
+        "in_python_ratio": null,
+        "baseline_overhead_med_ms": 29.888,
+        "ax_overhead_med_ms": 136.855,
+        "extra_overhead_ms": 106.967,
+        "checksum_match": true
+      },
+      "cpu_sieve": {
+        "baseline_warm_wall_med_ms": 109.039,
+        "ax_warm_wall_med_ms": 228.876,
+        "wall_diff_ms": 119.837,
+        "wall_ratio": 2.099,
+        "baseline_in_python_med_ms": 76.135,
+        "ax_in_python_med_ms": 90.603,
+        "in_python_diff_ms": 14.468,
+        "in_python_ratio": 1.19,
+        "baseline_overhead_med_ms": 33.352,
+        "ax_overhead_med_ms": 137.233,
+        "extra_overhead_ms": 103.881,
+        "checksum_match": true
+      },
+      "cpu_math": {
+        "baseline_warm_wall_med_ms": 193.841,
+        "ax_warm_wall_med_ms": 327.523,
+        "wall_diff_ms": 133.682,
+        "wall_ratio": 1.69,
+        "baseline_in_python_med_ms": 160.454,
+        "ax_in_python_med_ms": 188.193,
+        "in_python_diff_ms": 27.739,
+        "in_python_ratio": 1.173,
+        "baseline_overhead_med_ms": 31.81,
+        "ax_overhead_med_ms": 137.817,
+        "extra_overhead_ms": 106.007,
+        "checksum_match": true
+      },
+      "mem_json": {
+        "baseline_warm_wall_med_ms": 168.077,
+        "ax_warm_wall_med_ms": 358.155,
+        "wall_diff_ms": 190.078,
+        "wall_ratio": 2.131,
+        "baseline_in_python_med_ms": 107.436,
+        "ax_in_python_med_ms": 176.069,
+        "in_python_diff_ms": 68.633,
+        "in_python_ratio": 1.639,
+        "baseline_overhead_med_ms": 60.742,
+        "ax_overhead_med_ms": 187.728,
+        "extra_overhead_ms": 126.986,
+        "checksum_match": true
+      }
+    },
+    "ax_ssh_warm_default": {
+      "noop": {
+        "baseline_warm_wall_med_ms": 29.888,
+        "ax_warm_wall_med_ms": 141.963,
+        "wall_diff_ms": 112.075,
+        "wall_ratio": 4.75,
+        "baseline_in_python_med_ms": 0.0,
+        "ax_in_python_med_ms": 0.0,
+        "in_python_diff_ms": 0.0,
+        "in_python_ratio": null,
+        "baseline_overhead_med_ms": 29.888,
+        "ax_overhead_med_ms": 141.962,
+        "extra_overhead_ms": 112.074,
+        "checksum_match": true
+      },
+      "cpu_sieve": {
+        "baseline_warm_wall_med_ms": 109.039,
+        "ax_warm_wall_med_ms": 235.458,
+        "wall_diff_ms": 126.419,
+        "wall_ratio": 2.159,
+        "baseline_in_python_med_ms": 76.135,
+        "ax_in_python_med_ms": 93.54,
+        "in_python_diff_ms": 17.405,
+        "in_python_ratio": 1.229,
+        "baseline_overhead_med_ms": 33.352,
+        "ax_overhead_med_ms": 141.918,
+        "extra_overhead_ms": 108.566,
+        "checksum_match": true
+      },
+      "cpu_math": {
+        "baseline_warm_wall_med_ms": 193.841,
+        "ax_warm_wall_med_ms": 333.481,
+        "wall_diff_ms": 139.64,
+        "wall_ratio": 1.72,
+        "baseline_in_python_med_ms": 160.454,
+        "ax_in_python_med_ms": 189.805,
+        "in_python_diff_ms": 29.351,
+        "in_python_ratio": 1.183,
+        "baseline_overhead_med_ms": 31.81,
+        "ax_overhead_med_ms": 144.86,
+        "extra_overhead_ms": 113.05,
+        "checksum_match": true
+      },
+      "mem_json": {
+        "baseline_warm_wall_med_ms": 168.077,
+        "ax_warm_wall_med_ms": 371.491,
+        "wall_diff_ms": 203.414,
+        "wall_ratio": 2.21,
+        "baseline_in_python_med_ms": 107.436,
+        "ax_in_python_med_ms": 179.125,
+        "in_python_diff_ms": 71.689,
+        "in_python_ratio": 1.667,
+        "baseline_overhead_med_ms": 60.742,
+        "ax_overhead_med_ms": 188.368,
+        "extra_overhead_ms": 127.626,
+        "checksum_match": true
+      }
+    }
+  },
+  "comparisons_vs_local_rosetta_x86_64": {
+    "ax_ssh_warm_direct": {
+      "noop": {
+        "baseline_warm_wall_med_ms": 44.683,
+        "ax_warm_wall_med_ms": 136.856,
+        "wall_diff_ms": 92.173,
+        "wall_ratio": 3.063,
+        "baseline_in_python_med_ms": 0.0,
+        "ax_in_python_med_ms": 0.0,
+        "in_python_diff_ms": 0.0,
+        "in_python_ratio": null,
+        "baseline_overhead_med_ms": 44.683,
+        "ax_overhead_med_ms": 136.855,
+        "extra_overhead_ms": 92.172,
+        "checksum_match": true
+      },
+      "cpu_sieve": {
+        "baseline_warm_wall_med_ms": 189.088,
+        "ax_warm_wall_med_ms": 228.876,
+        "wall_diff_ms": 39.788,
+        "wall_ratio": 1.21,
+        "baseline_in_python_med_ms": 139.264,
+        "ax_in_python_med_ms": 90.603,
+        "in_python_diff_ms": -48.661,
+        "in_python_ratio": 0.651,
+        "baseline_overhead_med_ms": 50.77,
+        "ax_overhead_med_ms": 137.233,
+        "extra_overhead_ms": 86.463,
+        "checksum_match": true
+      },
+      "cpu_math": {
+        "baseline_warm_wall_med_ms": 345.518,
+        "ax_warm_wall_med_ms": 327.523,
+        "wall_diff_ms": -17.995,
+        "wall_ratio": 0.948,
+        "baseline_in_python_med_ms": 298.046,
+        "ax_in_python_med_ms": 188.193,
+        "in_python_diff_ms": -109.853,
+        "in_python_ratio": 0.631,
+        "baseline_overhead_med_ms": 45.805,
+        "ax_overhead_med_ms": 137.817,
+        "extra_overhead_ms": 92.012,
+        "checksum_match": true
+      },
+      "mem_json": {
+        "baseline_warm_wall_med_ms": 263.636,
+        "ax_warm_wall_med_ms": 358.155,
+        "wall_diff_ms": 94.519,
+        "wall_ratio": 1.359,
+        "baseline_in_python_med_ms": 174.363,
+        "ax_in_python_med_ms": 176.069,
+        "in_python_diff_ms": 1.706,
+        "in_python_ratio": 1.01,
+        "baseline_overhead_med_ms": 86.626,
+        "ax_overhead_med_ms": 187.728,
+        "extra_overhead_ms": 101.102,
+        "checksum_match": true
+      }
+    },
+    "ax_ssh_warm_default": {
+      "noop": {
+        "baseline_warm_wall_med_ms": 44.683,
+        "ax_warm_wall_med_ms": 141.963,
+        "wall_diff_ms": 97.28,
+        "wall_ratio": 3.177,
+        "baseline_in_python_med_ms": 0.0,
+        "ax_in_python_med_ms": 0.0,
+        "in_python_diff_ms": 0.0,
+        "in_python_ratio": null,
+        "baseline_overhead_med_ms": 44.683,
+        "ax_overhead_med_ms": 141.962,
+        "extra_overhead_ms": 97.279,
+        "checksum_match": true
+      },
+      "cpu_sieve": {
+        "baseline_warm_wall_med_ms": 189.088,
+        "ax_warm_wall_med_ms": 235.458,
+        "wall_diff_ms": 46.37,
+        "wall_ratio": 1.245,
+        "baseline_in_python_med_ms": 139.264,
+        "ax_in_python_med_ms": 93.54,
+        "in_python_diff_ms": -45.724,
+        "in_python_ratio": 0.672,
+        "baseline_overhead_med_ms": 50.77,
+        "ax_overhead_med_ms": 141.918,
+        "extra_overhead_ms": 91.148,
+        "checksum_match": true
+      },
+      "cpu_math": {
+        "baseline_warm_wall_med_ms": 345.518,
+        "ax_warm_wall_med_ms": 333.481,
+        "wall_diff_ms": -12.037,
+        "wall_ratio": 0.965,
+        "baseline_in_python_med_ms": 298.046,
+        "ax_in_python_med_ms": 189.805,
+        "in_python_diff_ms": -108.241,
+        "in_python_ratio": 0.637,
+        "baseline_overhead_med_ms": 45.805,
+        "ax_overhead_med_ms": 144.86,
+        "extra_overhead_ms": 99.055,
+        "checksum_match": true
+      },
+      "mem_json": {
+        "baseline_warm_wall_med_ms": 263.636,
+        "ax_warm_wall_med_ms": 371.491,
+        "wall_diff_ms": 107.855,
+        "wall_ratio": 1.409,
+        "baseline_in_python_med_ms": 174.363,
+        "ax_in_python_med_ms": 179.125,
+        "in_python_diff_ms": 4.762,
+        "in_python_ratio": 1.027,
+        "baseline_overhead_med_ms": 86.626,
+        "ax_overhead_med_ms": 188.368,
+        "extra_overhead_ms": 101.742,
+        "checksum_match": true
+      }
+    }
+  }
+}
