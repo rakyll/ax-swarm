@@ -27,10 +27,11 @@ ax-swarm post sw1 --as parser "@verifier [done] tests pass on branch swarm/parse
 ax-swarm wait sw1 --as parser --since 3
 ```
 
-To run against a real AX cluster (`ax local` or GKE), drop `--ax=mock` (defaults to `--ax=cli`, inheriting your active `kubectx` and AX's background tunnel):
+To run against a real AX cluster (`ax local` or GKE), drop `--ax=mock` (defaults to `--ax=cli`, inheriting your active `kubectx` and AX's background tunnel) and pass `--swarm-url` as the address reachable from inside AX Task containers:
 
 ```bash
-ax-swarm serve --ax=cli --public-url http://<reachable-host>:8787
+# Example for ax local (Kind)
+ax-swarm serve --ax=cli --addr 0.0.0.0:8787 --swarm-url http://host.docker.internal:8787
 ```
 
 Inside an AX Task container, install and run the worker entrypoint:

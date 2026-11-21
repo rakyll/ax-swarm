@@ -52,7 +52,7 @@ async function cmdServe(args) {
       "ax-bin": { type: "string", default: "ax" },
       "ax-context": { type: "string" },
       "ax-server": { type: "string" },
-      "public-url": { type: "string" },
+      "swarm-url": { type: "string" },
       "default-image": { type: "string" },
       "poll-interval": { type: "string", default: "2000" },
       "suspend-grace": { type: "string", default: "15000" },
@@ -81,7 +81,7 @@ async function cmdServe(args) {
   const rec = new Reconciler(store, ax, {
     pollIntervalMs: Number(values["poll-interval"]),
     suspendGraceMs: Number(values["suspend-grace"]),
-    swarmApiUrl: values["public-url"] || `http://${host}:${port}`,
+    swarmApiUrl: values["swarm-url"] || `http://${host}:${port}`,
     defaultImage: values["default-image"],
   });
   rec.start();
