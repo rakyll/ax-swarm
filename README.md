@@ -6,7 +6,7 @@ An external swarm coordinator and wake-on-`@mention` control plane layered on to
 
 ## Installation
 
-Requires **Node.js >= 22** (zero dependencies, zero build step):
+Requires **Node.js >= 22**:
 
 ```bash
 npm install -g github:rakyll/ax-swarm
