@@ -4,38 +4,43 @@ An external swarm coordinator and wake-on-`@mention` control plane layered on to
 
 `ax-swarm` runs alongside AX with no changes to AX itself. It manages the shared message board, member roster, and scales idle workers to zero—suspending them while waiting and waking them automatically when `@mentioned`.
 
-## Build & Test
+## Installation
 
-Pure Go standard library (zero external dependencies):
+Requires **Node.js >= 22.18** (runs TypeScript natively, no build step or dependencies):
 
 ```bash
-make build
-make test
-```
+# Run directly with npx
+npx github:rakyll/ax-swarm --help
 
-This builds two binaries in `bin/`:
-- `bin/ax-swarm` — server (`serve`), coordinator CLI (`create`, `add`, `post`, `read`, `wait`, `status`, `kill`), and Antigravity `swarm_board` viewer (`swarm --json --watch`).
-- `bin/ax-swarm-worker` — in-sandbox turn loop for AX Tasks that reads unread board posts, runs a headless agent harness (`claude -p`, `gemini -p`, `codex exec`, `opencode`, `agy`), and parks the member when done.
+# Or install globally
+npm install -g github:rakyll/ax-swarm
+```
 
 ## Quickstart (local dry-run with mock AX)
 
 ```bash
-# Terminal 1: start ax-swarm-server with the in-memory mock AX backend
-./bin/ax-swarm serve --ax=mock --suspend-grace=5s
+# Terminal 1: start the server with the in-memory mock AX backend
+npx github:rakyll/ax-swarm serve --ax=mock --suspend-grace=5000
 
-# Terminal 2: create a swarm, add workers, post messages, watch the board
-./bin/ax-swarm create sw1 --title "parser rewrite" --workspace golang
-./bin/ax-swarm add sw1 parser --runtime claude-code --brief "Fix the 3 failing tests in parser_test.go"
-./bin/ax-swarm add sw1 verifier --runtime gemini-cli --brief "Verify parser's changes when tagged"
-./bin/ax-swarm status sw1
-./bin/ax-swarm post sw1 --as parser "@verifier [done] tests pass on branch swarm/parser"
-./bin/ax-swarm wait sw1 --as parser --since 3
+# Terminal 2: create a swarm, add workers, post messages
+npx github:rakyll/ax-swarm create sw1 --title "parser rewrite" --workspace golang
+npx github:rakyll/ax-swarm add sw1 parser --runtime claude-code --brief "Fix the 3 failing tests in parser_test.go"
+npx github:rakyll/ax-swarm add sw1 verifier --runtime gemini-cli --brief "Verify parser's changes when tagged"
+npx github:rakyll/ax-swarm status sw1
+npx github:rakyll/ax-swarm post sw1 --as parser "@verifier [done] tests pass on branch swarm/parser"
+npx github:rakyll/ax-swarm wait sw1 --as parser --since 3
 ```
 
 To run against a real AX cluster (`ax local` or GKE), drop `--ax=mock` (defaults to `--ax=cli`, inheriting your active `kubectx` and AX's background tunnel):
 
 ```bash
-./bin/ax-swarm serve --ax=cli --public-url http://<reachable-host>:8787
+npx github:rakyll/ax-swarm serve --ax=cli --public-url http://<reachable-host>:8787
+```
+
+Inside an AX Task container, run the worker entrypoint with:
+
+```bash
+npx -y -p github:rakyll/ax-swarm ax-swarm-worker
 ```
 
 ## Antigravity Swarm Board Integration
@@ -44,10 +49,10 @@ To run against a real AX cluster (`ax local` or GKE), drop `--ax=mock` (defaults
 
 ```bash
 # Stream NDJSON snapshots (exits cleanly on stdin EOF)
-./bin/ax-swarm swarm --json --watch sw1
+npx github:rakyll/ax-swarm swarm --json --watch sw1
 
 # One-shot roster lookup
-./bin/ax-swarm swarm --json --roster-only sw1
+npx github:rakyll/ax-swarm swarm --json --roster-only sw1
 ```
 
 Configure `remote_board.json` in `swarm_board`:
@@ -59,4 +64,10 @@ Configure `remote_board.json` in `swarm_board`:
   "cli": ["ax-swarm"],
   "cli_env": "AX_SWARM_CLI"
 }
+```
+
+## Testing
+
+```bash
+node --test test/*.test.ts
 ```

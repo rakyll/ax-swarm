@@ -1,0 +1,21 @@
+{
+  "name": "ax-swarm",
+  "version": "0.1.0",
+  "description": "External swarm coordinator and wake-on-@mention control plane for AX",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "bin": {
+    "ax-swarm": "./bin/ax-swarm.ts",
+    "ax-swarm-worker": "./bin/ax-swarm-worker.ts"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.ts"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "README.md"
+  ]
+}
