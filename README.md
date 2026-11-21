@@ -25,7 +25,7 @@ npx github:rakyll/ax-swarm serve --ax=mock --suspend-grace=5000
 # Terminal 2: create a swarm, add workers, post messages
 npx github:rakyll/ax-swarm create sw1 --title "parser rewrite" --workspace golang
 npx github:rakyll/ax-swarm add sw1 parser --runtime claude-code --brief "Fix the 3 failing tests in parser_test.go"
-npx github:rakyll/ax-swarm add sw1 verifier --runtime gemini-cli --brief "Verify parser's changes when tagged"
+npx github:rakyll/ax-swarm add sw1 verifier --runtime claude-code --brief "Verify parser's changes when tagged"
 npx github:rakyll/ax-swarm status sw1
 npx github:rakyll/ax-swarm post sw1 --as parser "@verifier [done] tests pass on branch swarm/parser"
 npx github:rakyll/ax-swarm wait sw1 --as parser --since 3
