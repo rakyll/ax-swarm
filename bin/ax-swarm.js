@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // @ts-check
+import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { CLIAXClient, MockAXClient } from "../src/axclient.js";
 import { SwarmClient } from "../src/client.js";
@@ -30,8 +31,9 @@ Usage:
   ax-swarm status  <swarm-id>
   ax-swarm post    <swarm-id> [--as coordinator] [--channel main] <message...>
   ax-swarm read    <swarm-id> [--since 0] [--as <member>] [--channel <ch>]
-  ax-swarm wait    <swarm-id> --as <member> [--since 0] [--wake-mode mentions|any]
-  ax-swarm swarm   --json [--watch | --roster-only] [--db <db>] <swarm-id...>`);
+  ax-swarm wait         <swarm-id> --as <member> [--since 0] [--wake-mode mentions|any]
+  ax-swarm swarm        --json [--watch | --roster-only] [--db <db>] <swarm-id...>
+  ax-swarm remote-board [--backend ax-swarm] [--label "AX Swarm"] [--cli <cmd>] [--cli-env AX_SWARM_CLI] [--out <path>]`);
 }
 
 /** @param {string} serverUrl */
@@ -348,6 +350,41 @@ async function cmdSwarmViewer(args) {
   );
 }
 
+/** @param {string[]} args */
+async function cmdRemoteBoard(args) {
+  const { values } = parseArgs({
+    args,
+    options: {
+      backend: { type: "string", default: "ax-swarm" },
+      label: { type: "string", default: "AX Swarm" },
+      cli: { type: "string", multiple: true },
+      "cli-env": { type: "string", default: "AX_SWARM_CLI" },
+      out: { type: "string" },
+    },
+  });
+
+  const cliEntries =
+    values.cli && values.cli.length > 0
+      ? values.cli
+      : ["ax-swarm", resolve(process.argv[1])];
+
+  const doc = {
+    backend: values.backend,
+    label: values.label,
+    cli: [...new Set(cliEntries)],
+    cli_env: values["cli-env"],
+  };
+  const json = `${JSON.stringify(doc, null, 2)}\n`;
+
+  if (values.out) {
+    mkdirSync(dirname(resolve(values.out)), { recursive: true });
+    writeFileSync(values.out, json, "utf8");
+    console.log(`wrote ${values.out}`);
+    return;
+  }
+  process.stdout.write(json);
+}
+
 const [, , cmd, ...rest] = process.argv;
 if (!cmd || cmd === "-h" || cmd === "--help" || cmd === "help") {
   usage();
@@ -366,6 +403,7 @@ const commands = {
   read: cmdRead,
   wait: cmdWait,
   swarm: cmdSwarmViewer,
+  "remote-board": cmdRemoteBoard,
 };
 
 const fn = commands[cmd];

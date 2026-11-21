@@ -55,15 +55,14 @@ npx github:rakyll/ax-swarm swarm --json --watch sw1
 npx github:rakyll/ax-swarm swarm --json --roster-only sw1
 ```
 
-Configure `remote_board.json` in `swarm_board`:
+Generate `remote_board.json` for `swarm_board`:
 
-```json
-{
-  "backend": "ax-swarm",
-  "label": "AX Swarm",
-  "cli": ["ax-swarm"],
-  "cli_env": "AX_SWARM_CLI"
-}
+```bash
+# Print to stdout
+npx github:rakyll/ax-swarm remote-board
+
+# Or write directly to a file
+npx github:rakyll/ax-swarm remote-board --out /path/to/swarm_board/remote_board.json
 ```
 
 ## Testing
