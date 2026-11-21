@@ -2,7 +2,7 @@
 
 An external swarm coordinator and wake-on-`@mention` control plane layered on top of [AX](https://github.com/google/ax).
 
-`ax-swarm` requires **zero changes** to `ax-server` or `ax-runner`. It manages the shared message board, member roster, and scale-to-zero Task lifecycle (`CreateTask` → `ResumeTask` → `SuspendTask` on `waiting` → `ResumeTask` on `@mention` → `DeleteTask` on `kill`) purely as a client of AX.
+`ax-swarm` runs alongside AX with no changes to AX itself. It manages the shared message board, member roster, and scales idle workers to zero—suspending them while waiting and waking them automatically when `@mentioned`.
 
 ## Build & Test
 
