@@ -40,7 +40,8 @@ Usage:
 
   Every model input and output is logged to stderr with UTC timestamps: the
   planner's prompts and plans, each worker's goal and report, and a transcript
-  of the worker's tool calls and their results. -q logs only progress.
+  of the worker's tool calls and their results. -q logs only progress. On a
+  terminal the log is in color, with a live status line of the running steps.
 
 Environment:
   GEMINI_API_KEY  Gemini API key for the planner and, through the Gateway, the
@@ -67,6 +68,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import zlib
 
 AX_ROOT = pathlib.Path(os.environ.get("AX_ROOT") or pathlib.Path.home() / "ax").expanduser()
 GEMINI_API = "https://generativelanguage.googleapis.com/v1beta"
@@ -216,23 +218,174 @@ PLAN_SCHEMA = {
     "propertyOrdering": ["thought", "done", "answer", "steps"],
 }
 
-log_lock = threading.Lock()
+BOLD, DIM, ITALIC, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN = "1", "2", "3", "31", "32", "33", "34", "35", "36"
+# Colors that tell steps apart; red is left for failures.
+STEP_COLORS = ["36", "35", "34", "33", "32", "96", "95", "94", "93", "92"]
+SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+TRANSCRIPT_TAG_RE = re.compile(r"^\[(?:\S+ )?(\w+)\]")
+TRANSCRIPT_COLORS = {"call": (CYAN,), "result": (DIM,), "error": (RED,), "model": (MAGENTA,), "answer": (GREEN,)}
+
+
+class UI:
+    """Writes the log to stderr, in color and, when stderr is a terminal, with
+    a live status line under it showing what the swarm is waiting for."""
+
+    def __init__(self):
+        self.color = self.live = self.shown = self.paused = False
+        self.lock = threading.RLock()
+        self.text, self.since = "", 0.0
+        self.steps = {}  # name -> (state, since)
+        self.frame = 0
+
+    def start(self, color, live):
+        self.color, self.live = color, live
+        if live:
+            threading.Thread(target=self._tick, daemon=True).start()
+
+    def stop(self):
+        with self.lock:
+            self._clear()
+            self.live = False
+
+    def paint(self, text, *codes):
+        if not self.color or not codes:
+            return text
+        return f"\x1b[{';'.join(codes)}m{text}\x1b[0m"
+
+    def step_color(self, name):
+        return STEP_COLORS[zlib.crc32(name.encode()) % len(STEP_COLORS)]
+
+    def step_name(self, name):
+        return self.paint(name, BOLD, self.step_color(name))
+
+    def log(self, msg):
+        ts = time.strftime("%H:%M:%SZ", time.gmtime())
+        msg = msg.replace("\n", "\n" + " " * (len(ts) + 1))
+        with self.lock:
+            self._clear()
+            print(f"{self.paint(ts, DIM)} {msg}", file=sys.stderr, flush=True)
+            self._draw()
+
+    def status(self, text, restart=True):
+        with self.lock:
+            self.text = text
+            if restart:
+                self.since = time.time()
+            self._draw()
+
+    def set_steps(self, names):
+        with self.lock:
+            self.steps = {n: ("waiting", time.time()) for n in names}
+            self._draw()
+
+    def step(self, name, state):
+        with self.lock:
+            self.steps[name] = (state, time.time())
+            self._draw()
+
+    def ask(self, prompt):
+        """Prompts on the terminal and returns the stripped reply, or None at
+        end of input."""
+        with self.lock:
+            self._clear()
+            self.paused = True
+            sys.stderr.write(prompt)
+            sys.stderr.flush()
+        try:
+            line = sys.stdin.readline()
+        finally:
+            with self.lock:
+                self.paused = False
+        return line.strip() if line else None
+
+    def _tick(self):
+        while True:
+            time.sleep(0.1)
+            with self.lock:
+                self.frame += 1
+                self._draw()
+
+    def _clear(self):
+        if self.shown:
+            sys.stderr.write("\r\x1b[2K")
+            sys.stderr.flush()
+            self.shown = False
+
+    def _draw(self):
+        if not self.live or self.paused or not self.text:
+            return
+        now = time.time()
+        segs = [(SPINNER[self.frame % len(SPINNER)] + " ", (CYAN,)), (self.text, (BOLD,)),
+                (f" {now - self.since:.0f}s", (DIM,))]
+        if self.steps:
+            finished = sum(st in ("done", "failed", "skipped") for st, _ in self.steps.values())
+            failed = sum(st in ("failed", "skipped") for st, _ in self.steps.values())
+            segs.append((f" · {finished}/{len(self.steps)} finished", (DIM,)))
+            if failed:
+                segs.append((f" · {failed} failed", (RED,)))
+            running = [(n, s) for n, (st, s) in self.steps.items() if st == "running"]
+            if running:
+                segs.append((" ·", (DIM,)))
+                for n, s in running:
+                    segs += [(" " + n, (self.step_color(n),)), (f" {now - s:.0f}s", (DIM,))]
+            waiting = [n for n, (st, _) in self.steps.items() if st == "waiting"]
+            if waiting:
+                segs.append((f" · waiting: {', '.join(waiting)}", (YELLOW,)))
+        width = shutil.get_terminal_size().columns - 1
+        line = []
+        for text, codes in segs:
+            if len(text) >= width:
+                line.append(self.paint(text[: max(width - 1, 0)] + "…", *codes))
+                break
+            line.append(self.paint(text, *codes))
+            width -= len(text)
+        sys.stderr.write("\r\x1b[2K" + "".join(line))
+        sys.stderr.flush()
+        self.shown = True
+
+
+ui = UI()
 
 
 def log(msg):
     """Logs msg with a UTC timestamp, indenting its continuation lines under
     the first."""
-    ts = time.strftime("%H:%M:%SZ", time.gmtime())
-    msg = msg.replace("\n", "\n" + " " * (len(ts) + 1))
-    with log_lock:
-        print(f"{ts} {msg}", file=sys.stderr, flush=True)
+    ui.log(msg)
 
 
-def log_block(title, text):
+def log_block(title, text, color=DIM):
     """Logs a multi-line model input or output in one piece, so the blocks of
     concurrent steps do not interleave."""
     lines = (text or "").rstrip().splitlines() or ["(empty)"]
-    log(f"┌ {title}\n" + "\n".join(f"│ {line}" for line in lines) + "\n└")
+    bar = ui.paint("│", color)
+    log(f"{ui.paint('┌', color)} {ui.paint(title, BOLD, color)}\n"
+        + "\n".join(f"{bar} {line}" for line in lines) + f"\n{ui.paint('└', color)}")
+
+
+def color_transcript(text):
+    """Colors a worker transcript by entry kind; an entry's continuation lines
+    keep its color."""
+    out, codes = [], ()
+    for line in text.splitlines():
+        if m := TRANSCRIPT_TAG_RE.match(line):
+            codes = TRANSCRIPT_COLORS.get(m.group(1), ())
+        out.append(ui.paint(line, *codes))
+    return "\n".join(out)
+
+
+def show_plan(plan):
+    """Logs the steps of a plan, one per line with the start of its goal."""
+    width = shutil.get_terminal_size().columns - 16
+    lines = []
+    for st in plan.get("steps") or []:
+        line = f"  {ui.paint('◆', ui.step_color(st['name']))} {ui.step_name(st['name'])}"
+        if st.get("inputs"):
+            line += ui.paint(f" ← {', '.join(st['inputs'])}", DIM)
+        goal = (st.get("goal") or "").strip().split("\n")[0]
+        if len(goal) > width:
+            goal = goal[: max(width - 1, 0)] + "…"
+        lines.append(f"{line}\n    {ui.paint(goal, DIM)}")
+    log("\n".join(lines))
 
 
 def truncate(s, n):
@@ -310,7 +463,7 @@ class Gemini:
                         raise RuntimeError(err)
                 except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
                     err = f"Gemini API request to {model} failed: {e}"
-                log(f"planner: {err}; retrying")
+                log(ui.paint(f"planner: {err}; retrying", YELLOW))
             else:
                 continue
             break
@@ -406,7 +559,7 @@ class Swarm:
                        input=api_key, text=True, check=True, capture_output=True)
         self.kubectl = kubectl
         subprocess.run(kubectl + ["label", "secret", self.secret, "ax.io/credential=true"], check=True, capture_output=True)
-        log(f"created Secret {a.atespace}/{self.secret}")
+        log(f"{ui.paint('✓', GREEN)} created Secret {a.atespace}/{self.secret}")
 
         self.ax.apply({
             "apiVersion": "ax.io/v1alpha1", "kind": "Gateway", "metadata": {"name": self.name},
@@ -419,7 +572,7 @@ class Swarm:
             ]},
         })
         self.created.append(("gateway", self.name))
-        log(f"created Gateway {self.name}")
+        log(f"{ui.paint('✓', GREEN)} created Gateway {self.name}")
 
         self.ax.apply({
             "apiVersion": "ax.io/v1alpha1", "kind": "Model", "metadata": {"name": self.name},
@@ -429,7 +582,7 @@ class Swarm:
         self.created.append(("model", self.name))
         # Workers use the model the Model resource names.
         self.worker_model = self.ax.column("model", self.name, "MODEL") or a.worker_model
-        log(f"created Model {self.name} ({self.worker_model})")
+        log(f"{ui.paint('✓', GREEN)} created Model {self.name} ({self.worker_model})")
 
         self.ax.apply({
             "apiVersion": "ax.io/v1alpha1", "kind": "Workspace", "metadata": {"name": self.name},
@@ -444,9 +597,11 @@ class Swarm:
             },
         })
         self.created.append(("workspace", self.name))
-        log(f"created Workspace {self.name}; waiting for its setup")
+        log(f"{ui.paint('✓', GREEN)} created Workspace {self.name}; waiting for its setup")
+        ui.status(f"setting up Workspace {self.name}")
         deadline = time.time() + a.task_timeout
         while (phase := self.ax.column("workspace", self.name, "PHASE")) != "Ready":
+            ui.status(f"setting up Workspace {self.name}: {phase or 'pending'}", restart=False)
             if phase == "Failed":
                 raise RuntimeError(f"workspace {self.name} failed setup; see `ax describe workspace {self.name}`")
             if time.time() > deadline:
@@ -457,6 +612,8 @@ class Swarm:
         if self.args.keep:
             log(f"keeping everything named {self.name}*")
             return
+        ui.set_steps([])
+        ui.status("cleaning up")
         for kind, name in reversed(self.created):
             self.ax.delete(kind, name)
         if self.secret and getattr(self, "kubectl", None):
@@ -496,7 +653,9 @@ class Swarm:
             out = self.ax.run("ssh", task, "--", "cat", OUTPUT_FILE).stdout
             if not self.args.quiet:
                 p = self.ax.run("ssh", task, "--", "cat", TRANSCRIPT_FILE, check=False)
-                log_block(f"{step}: worker transcript", p.stdout if p.returncode == 0 else f"(unavailable: {p.stderr.strip()})")
+                log_block(f"{step}: worker transcript",
+                          color_transcript(p.stdout) if p.returncode == 0 else f"(unavailable: {p.stderr.strip()})",
+                          ui.step_color(step))
             if out.startswith("WORKER ERROR:"):
                 raise RuntimeError(out.strip())
             return out
@@ -518,24 +677,28 @@ class Swarm:
         for inp in step.get("inputs") or []:
             res = input_futures[inp].result() if inp in input_futures else finished[inp]
             if res.get("error"):
-                log(f"  {step['name']}: skipped, input {inp} failed")
+                ui.step(step["name"], "skipped")
+                log(f"  {ui.paint('↷', YELLOW)} {ui.step_name(step['name'])} {ui.paint(f'skipped, input {inp} failed', YELLOW)}")
                 return {"step": step, "error": f"not run: input {inp!r} failed"}
             inputs.append(res)
         start = time.time()
         try:
             with self.slots:
-                log(f"  {step['name']}: started")
+                ui.step(step["name"], "running")
+                log(f"  {ui.paint('▶', CYAN)} {ui.step_name(step['name'])} started")
                 start = time.time()
                 goal = worker_goal(step, inputs)
                 if not self.args.quiet:
-                    log_block(f"{step['name']}: worker input", goal)
+                    log_block(f"{step['name']}: worker input", goal, ui.step_color(step["name"]))
                 out = self.run_task(step["name"], goal)
         except Exception as e:
-            log(f"  {step['name']}: failed after {time.time() - start:.0f}s: {e}")
+            ui.step(step["name"], "failed")
+            log(f"  {ui.paint('✗', RED)} {ui.step_name(step['name'])} {ui.paint(f'failed after {time.time() - start:.0f}s: {e}', RED)}")
             return {"step": step, "error": str(e)}
-        log(f"  {step['name']}: done in {time.time() - start:.0f}s")
+        ui.step(step["name"], "done")
+        log(f"  {ui.paint('✓', GREEN)} {ui.step_name(step['name'])} {ui.paint(f'done in {time.time() - start:.0f}s', GREEN)}")
         if not self.args.quiet:
-            log_block(f"{step['name']}: worker output", out)
+            log_block(f"{step['name']}: worker output", out, ui.step_color(step["name"]))
         return {"step": step, "output": out}
 
     def run_round(self, steps, finished):
@@ -557,22 +720,28 @@ class Swarm:
         while True:
             rnd += 1
             left = a.max_rounds - len(history)
+            log(ui.paint(f"━━ round {rnd} ━━", BOLD, MAGENTA))
             prompt = planner_prompt(goal, history, left, a.max_steps, a.parallel)
             if not a.quiet:
-                log_block(f"round {rnd}: planner input", prompt)
+                log_block(f"round {rnd}: planner input", prompt, BLUE)
+            ui.set_steps([])
+            ui.status(f"round {rnd}: planning with {a.model}")
             plan = self.planner.generate_json(PLANNER_INSTRUCTION, prompt, PLAN_SCHEMA)
             if not a.quiet:
-                log_block(f"round {rnd}: planner output", json.dumps(plan, indent=2, ensure_ascii=False))
+                log_block(f"round {rnd}: planner output", json.dumps(plan, indent=2, ensure_ascii=False), MAGENTA)
             if plan.get("thought"):
-                log(f"round {rnd}: {plan['thought']}")
+                log(f"{ui.paint('planner:', BOLD, MAGENTA)} {ui.paint(plan['thought'], ITALIC)}")
             if plan.get("done"):
                 return plan.get("answer", "")
             if left <= 0:
                 raise RuntimeError(f"the planner did not answer after {a.max_rounds} rounds")
             if err := validate(plan, finished, a.max_steps):
-                log(f"round {rnd}: plan rejected: {err}")
+                log(ui.paint(f"plan rejected: {err}", YELLOW))
                 history.append({"plan": plan, "rejected": err})
                 continue
+            show_plan(plan)
+            ui.status(f"round {rnd}")
+            ui.set_steps([st["name"] for st in plan["steps"]])
             results = self.run_round(plan["steps"], finished)
             for res in results:
                 finished[res["step"]["name"]] = res
@@ -589,7 +758,7 @@ def default_image():
 
 def main():
     p = argparse.ArgumentParser(description="Work on a goal with a swarm of AX tasks planned by Gemini.")
-    p.add_argument("goal", nargs="+", help="what to achieve")
+    p.add_argument("goal", nargs="*", help="what to achieve (prompted for when not given)")
     p.add_argument("--repo", action="append", default=[], help="git repository the Workspace clones (repeatable)")
     p.add_argument("--model", default=DEFAULT_MODEL, help="Gemini model that plans (default %(default)s)")
     p.add_argument("--fallback-model", action="append", default=[],
@@ -606,7 +775,19 @@ def main():
     p.add_argument("--keep", action="store_true", help="keep what the swarm created")
     p.add_argument("-q", "--quiet", action="store_true",
                    help="do not log the planner's and the workers' model inputs and outputs and the workers' tool calls")
+    p.add_argument("--color", choices=["auto", "always", "never"], default="auto",
+                   help="color the log (default: when stderr is a terminal and NO_COLOR is unset)")
     args = p.parse_args()
+
+    tty = sys.stderr.isatty() and os.environ.get("TERM") != "dumb"
+    ui.color = args.color == "always" or (args.color == "auto" and tty and not os.environ.get("NO_COLOR"))
+    if not args.goal and not sys.stdin.isatty():
+        p.error("a goal is required when stdin is not a terminal")
+    if not args.goal:
+        goal = ui.ask(f"{ui.paint('?', BOLD, CYAN)} {ui.paint('What should the swarm do?', BOLD)} ")
+        if not goal:
+            sys.exit("ax-swarm: no goal")
+        args.goal = [goal]
 
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
@@ -623,16 +804,23 @@ def main():
     ax_bin = os.environ.get("AX_BIN") or (str(AX_ROOT / "bin/ax") if (AX_ROOT / "bin/ax").exists() else "ax")
     swarm = Swarm(args, AX(ax_bin, args.atespace, args.context), Gemini(api_key, [args.model] + args.fallback_model))
     goal = " ".join(args.goal)
-    log(f"swarm {args.name}: planning with {args.model}, workers on {args.worker_model}")
+    ui.start(ui.color, tty)
+    log(f"{ui.paint('swarm ' + args.name, BOLD, CYAN)}: planning with {ui.paint(args.model, BOLD)}, "
+        f"workers on {ui.paint(args.worker_model, BOLD)}")
+    start = time.time()
     try:
         swarm.setup(api_key)
         answer = swarm.run(goal)
     except subprocess.CalledProcessError as e:
-        sys.exit(f"ax-swarm: {' '.join(e.cmd[:6])}...: {(e.stderr or b'').strip()}")
+        sys.exit(ui.paint(f"ax-swarm: {' '.join(e.cmd[:6])}...: {(e.stderr or b'').strip()}", RED))
     except (RuntimeError, KeyboardInterrupt) as e:
-        sys.exit(f"ax-swarm: {e or 'interrupted'}")
+        sys.exit(ui.paint(f"ax-swarm: {e or 'interrupted'}", RED))
     finally:
         swarm.cleanup()
+        ui.stop()
+    log(ui.paint(f"answered in {time.time() - start:.0f}s", BOLD, GREEN))
+    if sys.stdout.isatty() and ui.color:
+        print(ui.paint("━━ answer ━━", BOLD, GREEN))
     print(answer.strip())
 
 
