@@ -70,7 +70,7 @@ import urllib.request
 
 AX_ROOT = pathlib.Path(os.environ.get("AX_ROOT") or pathlib.Path.home() / "ax").expanduser()
 GEMINI_API = "https://generativelanguage.googleapis.com/v1beta"
-DEFAULT_MODEL = "gemini-3.6-flash"
+DEFAULT_MODEL = "gemini-4-neon"
 OUTPUT_FILE = "/workspace/.ax/output"
 # A worker's goal with its inputs stays well within the 31 KiB the control
 # plane allows for a task's launch configuration.
@@ -451,7 +451,7 @@ class Swarm:
                 raise RuntimeError(f"workspace {self.name} failed setup; see `ax describe workspace {self.name}`")
             if time.time() > deadline:
                 raise RuntimeError(f"workspace {self.name} is {phase} after {a.task_timeout}s")
-            time.sleep(2)
+            time.sleep(0.5)
 
     def cleanup(self):
         if self.args.keep:
@@ -492,7 +492,7 @@ class Swarm:
                     raise RuntimeError(f"task {task} is {state}; see `ax describe task {task}`")
                 if time.time() > deadline:
                     raise RuntimeError(f"no output from task {task} after {self.args.task_timeout}s")
-                time.sleep(3)
+                time.sleep(0.5)
             out = self.ax.run("ssh", task, "--", "cat", OUTPUT_FILE).stdout
             if not self.args.quiet:
                 p = self.ax.run("ssh", task, "--", "cat", TRANSCRIPT_FILE, check=False)
@@ -511,7 +511,7 @@ class Swarm:
                 raise RuntimeError(f"task {task} is {state}; see `ax describe task {task}`")
             if time.time() > deadline:
                 raise RuntimeError(f"task {task} is {state} after {self.args.task_timeout}s")
-            time.sleep(1)
+            time.sleep(0.2)
 
     def run_step(self, step, input_futures, finished):
         inputs = []
