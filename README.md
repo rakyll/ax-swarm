@@ -146,7 +146,7 @@ ax-swarm \
 | `--parallel` | `8` | Target max concurrent AX Tasks hint for the swarm |
 | `--task-timeout` | `30m` | Workspace setup timeout as Go duration or integer seconds |
 | `--keep` | `false` | Keep AX Tasks, Workspace, and Gateway on exit |
-| `--model` | | Model passed to `agy --model` |
+| `--model` | `hydrogen-l-tf-medium` (Gemini 4 Hydrogen, Medium) | Model ID passed to `agy --model`; list IDs with `agy models`. Pass `--model ""` to use agy's default |
 | `--effort` | | Reasoning effort passed to `agy --effort` (`low\|medium\|high\|xhigh\|max`) |
 | `--mode` | | Agent mode passed to `agy --mode` (`accept-edits\|auto\|plan`) |
 | `--project` | | Project ID or name passed to `agy --project` |

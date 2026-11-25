@@ -137,6 +137,9 @@ func TestWorkspaceConfig(t *testing.T) {
 
 	// The spec's image wins over the default.
 	cfg := parse("--workspace-config", path)
+	if cfg.Model != "hydrogen-l-tf-medium" {
+		t.Fatalf("default Model = %q, want hydrogen-l-tf-medium", cfg.Model)
+	}
 	if cfg.Image != specImage {
 		t.Fatalf("Image = %q, want spec image", cfg.Image)
 	}

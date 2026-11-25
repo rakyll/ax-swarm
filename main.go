@@ -183,6 +183,9 @@ func defaultAgyBin() string {
 // (https://antigravity.google/docs/getting-started).
 const agyInstallCommand = "curl -fsSL https://antigravity.google/cli/install.sh | bash"
 
+// defaultModel is the agy model used when --model is not set.
+const defaultModel = "hydrogen-l-tf-medium" // Gemini 4 Hydrogen (Medium)
+
 // resolveAgy finds the agy binary. When the default "agy" is not on PATH it
 // also checks ~/.local/bin/agy, where the installer puts it, since that
 // directory is often missing from PATH right after installing.
@@ -261,7 +264,7 @@ Environment:
 	fs.StringVar(&cfg.Color, "color", "auto", "color logs: auto, always, never")
 	fs.StringVar(&cfg.AXBin, "ax-bin", defaultAXBin(axRoot), "path to ax CLI binary")
 	fs.StringVar(&cfg.AgyBin, "agy-bin", defaultAgyBin(), "path to agy CLI binary")
-	fs.StringVar(&cfg.Model, "model", "", "model passed to agy --model")
+	fs.StringVar(&cfg.Model, "model", defaultModel, "model passed to agy --model (empty uses agy's default)")
 	fs.StringVar(&cfg.Effort, "effort", "", "reasoning effort passed to agy --effort (low|medium|high|xhigh|max)")
 	fs.StringVar(&cfg.Mode, "mode", "", "agent mode passed to agy --mode (accept-edits|auto|plan)")
 	fs.StringVar(&cfg.Project, "project", "", "project ID or name passed to agy --project")
