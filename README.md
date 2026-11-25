@@ -167,4 +167,3 @@ go vet ./...
 ## Repository Layout
 
 - Root (`*.go`, `go.mod`, `Makefile`): Go `ax-swarm` CLI with Bubble Tea UI and `agy /swarm` integration.
-- `agy/`: Earlier Node.js external swarm coordinator server, wake-on-`@mention` reconciler, `swarm_board` viewer, and AX Python benchmarks.
