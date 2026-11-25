@@ -28,7 +28,7 @@ Type "export PATH=$HOME/go/bin:$HOME/.local/bin:$PATH PS1='$ ' && clear"
 Enter
 Show
 
-Type `ax-swarm --name swarm-demo --model gemini-flash-next "Write a Python palindrome checker with two unit tests in /workspace and run the tests"`
+Type `ax-swarm --name swarm-demo "Write a Python palindrome checker with two unit tests in the workspace and run the tests"`
 Sleep 500ms
 Enter
 
