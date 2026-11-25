@@ -14,7 +14,7 @@ Run an [AX](https://github.com/google/ax) workspace swarm driven by Antigravity 
 
 - **Go 1.26+**
 - **`ax` CLI** configured against a running AX cluster (e.g. `ax local start` or GKE) and a digest-pinned runner image (`$AX_TASK_IMAGE` or `$AX_ROOT/bin/ax-runner.digest`)
-- **`agy` CLI** installed and authenticated (`agy` on `PATH` or via `AGY_BIN`)
+- **`agy` CLI** installed and authenticated (`agy` on `PATH` or via `AGY_BIN`). Install it with `curl -fsSL https://antigravity.google/cli/install.sh | bash` ([docs](https://antigravity.google/docs/getting-started)).
 
 ## Install
 

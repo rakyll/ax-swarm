@@ -211,3 +211,35 @@ func TestUIAskAndLifecycle(t *testing.T) {
 		t.Fatalf("expected log output in %q", out.String())
 	}
 }
+
+func TestAgyMissingMessageAndResolve(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // no ~/.local/bin/agy fallback
+	t.Setenv("PATH", t.TempDir())
+
+	if _, err := resolveAgy("agy"); err == nil {
+		t.Fatalf("expected agy to be missing")
+	}
+	msg := agyMissingMessage("agy")
+	for _, want := range []string{"not installed", agyInstallCommand, "https://antigravity.google/docs/getting-started"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("message missing %q:\n%s", want, msg)
+		}
+	}
+	if custom := agyMissingMessage("/opt/agy"); !strings.Contains(custom, `"/opt/agy"`) || !strings.Contains(custom, "--agy-bin") {
+		t.Fatalf("custom-path message should name the path and flag:\n%s", custom)
+	}
+
+	// The installer's default location is used when agy is not on PATH.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	bin := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "agy"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := resolveAgy("agy"); err != nil || got != filepath.Join(bin, "agy") {
+		t.Fatalf("resolveAgy fallback = %q, %v", got, err)
+	}
+}

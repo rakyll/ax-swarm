@@ -169,6 +169,40 @@ func defaultAgyBin() string {
 	return "agy"
 }
 
+// agyInstallCommand is the official Antigravity CLI installer for macOS/Linux
+// (https://antigravity.google/docs/getting-started).
+const agyInstallCommand = "curl -fsSL https://antigravity.google/cli/install.sh | bash"
+
+// resolveAgy finds the agy binary. When the default "agy" is not on PATH it
+// also checks ~/.local/bin/agy, where the installer puts it, since that
+// directory is often missing from PATH right after installing.
+func resolveAgy(bin string) (string, error) {
+	path, err := exec.LookPath(bin)
+	if err == nil {
+		return path, nil
+	}
+	if bin == "agy" {
+		if home, herr := os.UserHomeDir(); herr == nil {
+			candidate := filepath.Join(home, ".local", "bin", "agy")
+			if p, lerr := exec.LookPath(candidate); lerr == nil {
+				return p, nil
+			}
+		}
+	}
+	return "", err
+}
+
+// agyMissingMessage explains how to get agy when it cannot be found.
+func agyMissingMessage(bin string) string {
+	where := "the Antigravity CLI (agy) is not installed or not on your PATH."
+	if bin != "agy" {
+		where = fmt.Sprintf("agy was not found at %q (set by --agy-bin or AGY_BIN).", bin)
+	}
+	return where + "\n\nInstall it with:\n\n  " + agyInstallCommand +
+		"\n\nthen make sure ~/.local/bin is on your PATH (or pass --agy-bin <path>).\n" +
+		"Docs: https://antigravity.google/docs/getting-started"
+}
+
 func randomSwarmName() (string, error) {
 	var b [3]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -390,9 +424,9 @@ func run(args []string, stdin *os.File, stdout, stderr *os.File) int {
 	}
 	cfg.AXBin = resolvedAX
 
-	resolvedAgy, err := exec.LookPath(cfg.AgyBin)
+	resolvedAgy, err := resolveAgy(cfg.AgyBin)
 	if err != nil {
-		fmt.Fprintf(stderr, "%s\n", ui.Paint(fmt.Sprintf("ax-swarm: agy binary %q not found: %v", cfg.AgyBin, err), ansiRed))
+		fmt.Fprintln(stderr, ui.Paint("ax-swarm: "+agyMissingMessage(cfg.AgyBin), ansiRed))
 		return 1
 	}
 	cfg.AgyBin = resolvedAgy

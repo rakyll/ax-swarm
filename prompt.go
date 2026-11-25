@@ -68,6 +68,7 @@ func BuildSwarmPrompt(cfg Config, axBaseCmd string) string {
 	} else {
 		fmt.Fprintf(&b, "8. **Clean up completed tasks.** Delete each AX Task with `%s delete task <task-name>` once its work is collected (or suspend idle tasks with `suspend task` if you plan to reuse them). Any remaining `%s-*` tasks, along with the shared Workspace and Gateway, will also be deleted automatically when this session exits.\n", axBaseCmd, cfg.Name)
 	}
+	b.WriteString("9. **Every worker must report back, and the session must end.** The coordinator waits until a worker posts a message naming `@coordinator`, so a worker that finishes silently leaves the whole swarm waiting forever. End every worker brief with: \"When you finish, or if you are blocked or fail, post exactly one board message starting with `@coordinator [done]` or `@coordinator [blocked]` and a short summary with evidence. Do this even if the work failed.\" Once every worker has reported (or been stopped), write the final answer and end the session; do not keep waiting.\n")
 	b.WriteString("\n")
 
 	b.WriteString("## AX CLI Task Lifecycle Reference\n\n")

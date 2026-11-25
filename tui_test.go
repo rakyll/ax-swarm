@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -397,5 +398,63 @@ func TestRenderErrorWrapsLongAXErrors(t *testing.T) {
 		if !strings.Contains(flat, want) {
 			t.Fatalf("rendered error missing %q:\n%s", want, rendered)
 		}
+	}
+}
+
+func TestPrintlnWrapsToTerminalWidth(t *testing.T) {
+	var out bytes.Buffer
+	m := newTUIModel(testTUIConfig("x"), &SwarmEnv{AX: &AX{}, Name: "swarm-tui01"}, newTUIStyles(&out, "never", false), noopAgyStarter)
+	defer m.cancelSetup()
+	defer m.cancelAgy()
+	m.width = 40
+
+	long := "#6 [verifier] @coordinator Phase 1 complete. swarm-c3dbe9-verify checked /workspace (only .ax present so far), Python 3.12.16"
+	msg := m.println(long)()
+	text := fmt.Sprint(msg)
+	for _, line := range strings.Split(strings.TrimSpace(strings.Trim(text, "{}")), "\n") {
+		if w := lipgloss.Width(line); w > 40 {
+			t.Fatalf("printed line wider than terminal (%d > 40): %q", w, line)
+		}
+	}
+	if !strings.Contains(strings.Join(strings.Fields(text), " "), "Python 3.12.16") {
+		t.Fatalf("wrapped output lost content: %q", text)
+	}
+}
+
+func TestIdleWarningExplainsSwarmWait(t *testing.T) {
+	var out bytes.Buffer
+	m := newTUIModel(testTUIConfig("x"), &SwarmEnv{AX: &AX{}, Name: "swarm-tui01"}, newTUIStyles(&out, "never", false), noopAgyStarter)
+	defer m.cancelSetup()
+	defer m.cancelAgy()
+	m.stage = stageRunningAgy
+	m.agyRan = true
+
+	updated, _ := m.Update(agyStreamMsg{ev: AgyEvent{Kind: AgyEventSwarmWorker, WorkerName: "stats", WorkerState: "working"}, ok: true})
+	m = updated.(tuiModel)
+	updated, _ = m.Update(agyStreamMsg{ev: AgyEvent{Kind: AgyEventTool, ToolName: "swarm_wait", ToolState: "ACTIVE"}, ok: true})
+	m = updated.(tuiModel)
+	if m.waitingSince.IsZero() || !strings.Contains(m.renderRunningStatusLine(), "waiting for a worker to report") {
+		t.Fatalf("expected waiting status, got %q", m.renderRunningStatusLine())
+	}
+
+	// Simulate 2 minutes of silence, then a task poll triggers the idle warning once.
+	m.lastActivity = time.Now().Add(-2 * time.Minute)
+	updated, _ = m.Update(taskListMsg{})
+	m = updated.(tuiModel)
+	if !m.idleWarned {
+		t.Fatalf("expected idle warning after 2m of silence")
+	}
+	msg := m.idleMessage(2*time.Minute, time.Now())
+	for _, want := range []string{"no swarm activity for 2m0s", "waiting for a worker to post @coordinator", "as of when each worker was added", "ctrl+c"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("idle message missing %q: %s", want, msg)
+		}
+	}
+
+	// Any new agy event clears the waiting state.
+	updated, _ = m.Update(agyStreamMsg{ev: AgyEvent{Kind: AgyEventActivity, Text: "swarm update received"}, ok: true})
+	m = updated.(tuiModel)
+	if !m.waitingSince.IsZero() || m.idleWarned {
+		t.Fatalf("expected activity to clear waiting/idle state")
 	}
 }

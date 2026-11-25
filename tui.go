@@ -28,6 +28,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 )
 
@@ -178,6 +179,11 @@ type tuiModel struct {
 	resumeErrShown map[string]bool
 	taskPollCount  int
 	lastPollErr    string
+
+	lastActivity time.Time // last agy event or AX task state change
+	waitingSince time.Time // coordinator is blocked in swarm_wait since then
+	rosterAt     time.Time // when worker states were last reported by `swarm status`
+	idleWarned   bool
 
 	lineBuf        string
 	streamedOutput string
@@ -422,10 +428,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.agyCh = msg.ch
 		m.agyRan = true
+		m.lastActivity = time.Now()
 		m.agyStatus = "initializing swarm"
 		m.stage = stageRunningAgy
 		return m, tea.Batch(
-			tea.Println(m.renderSetupBanner()),
+			m.println(m.renderSetupBanner()),
 			waitAgyEventCmd(m.agyCh),
 			m.pollTasksCmd(),
 		)
@@ -437,14 +444,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !msg.ok || msg.ev.Kind == AgyEventDone {
 			var flushCmds []tea.Cmd
 			if m.lineBuf != "" {
-				flushCmds = append(flushCmds, tea.Println(m.lineBuf))
+				flushCmds = append(flushCmds, m.println(m.lineBuf))
 				m.lineBuf = ""
 			}
 			if m.finalResponse != "" && strings.TrimSpace(m.streamedOutput) == "" {
 				trimmed := strings.TrimRight(m.finalResponse, "\n")
 				m.streamedOutput = m.finalResponse
 				if trimmed != "" {
-					flushCmds = append(flushCmds, tea.Println(trimmed))
+					flushCmds = append(flushCmds, m.println(trimmed))
 				}
 			}
 			if msg.ok && msg.ev.Err != nil {
@@ -462,6 +469,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		var cmds []tea.Cmd
 		ev := msg.ev
+		m.lastActivity = time.Now()
+		m.idleWarned = false
+		if !(ev.Kind == AgyEventTool && ev.ToolName == "swarm_wait" && ev.ToolState == "ACTIVE") {
+			m.waitingSince = time.Time{}
+		}
 		switch ev.Kind {
 		case AgyEventInit:
 			if ev.Model != "" {
@@ -469,7 +481,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.agyStatus = "planning swarm"
 			if m.agyModel != "" {
-				cmds = append(cmds, tea.Println(fmt.Sprintf("%s started agy /swarm %s",
+				cmds = append(cmds, m.println(fmt.Sprintf("%s started agy /swarm %s",
 					m.styles.swarmName.Render("▸"),
 					m.styles.subtle.Render("("+m.agyModel+")"),
 				)))
@@ -483,23 +495,24 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case AgyEventSwarmTitle:
 			m.swarmTitle = ev.SwarmTitle
 			m.agyStatus = "swarm: " + ev.SwarmTitle
-			cmds = append(cmds, tea.Println(fmt.Sprintf("%s %s", m.styles.swarmName.Render("◆"), m.styles.active.Render(ev.SwarmTitle))))
+			cmds = append(cmds, m.println(fmt.Sprintf("%s %s", m.styles.swarmName.Render("◆"), m.styles.active.Render(ev.SwarmTitle))))
 
 		case AgyEventSwarmWorker:
 			m.setWorkerState(ev.WorkerName, ev.WorkerState)
 			if ev.WorkerState == "killed" {
 				m.agyStatus = "stopped worker " + ev.WorkerName
-				cmds = append(cmds, tea.Println(fmt.Sprintf("%s worker %s stopped", m.styles.warnIcon.Render("×"), m.styles.workerName.Render(ev.WorkerName))))
+				cmds = append(cmds, m.println(fmt.Sprintf("%s worker %s stopped", m.styles.warnIcon.Render("×"), m.styles.workerName.Render(ev.WorkerName))))
 			} else {
 				m.agyStatus = "waiting on workers"
 				line := fmt.Sprintf("%s worker %s", m.styles.okIcon.Render("+"), m.styles.workerName.Render(ev.WorkerName))
 				if brief := oneLinePreview(ev.WorkerBrief, 90); brief != "" {
 					line += "  " + m.styles.subtle.Render(brief)
 				}
-				cmds = append(cmds, tea.Println(line))
+				cmds = append(cmds, m.println(line))
 			}
 
 		case AgyEventSwarmRoster:
+			m.rosterAt = time.Now()
 			if ev.SwarmTitle != "" {
 				m.swarmTitle = ev.SwarmTitle
 			}
@@ -519,7 +532,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(summaryParts) > 0 {
 				detail = strings.Join(summaryParts, ", ")
 			}
-			cmds = append(cmds, tea.Println(fmt.Sprintf("%s swarm status: %s",
+			cmds = append(cmds, m.println(fmt.Sprintf("%s swarm status: %s",
 				m.styles.infoIcon.Render("◌"),
 				m.styles.subtle.Render(detail),
 			)))
@@ -539,11 +552,11 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					prefix = fmt.Sprintf("%s %s", m.styles.subtle.Render(fmt.Sprintf("#%d", bm.Seq)), prefix)
 				}
 				preview := oneLinePreview(bm.Text, 120)
-				cmds = append(cmds, tea.Println(fmt.Sprintf("%s %s", prefix, preview)))
+				cmds = append(cmds, m.println(fmt.Sprintf("%s %s", prefix, preview)))
 				printed++
 			}
 			if printed == 0 && ev.BoardHead > 0 {
-				cmds = append(cmds, tea.Println(fmt.Sprintf("%s board check %s",
+				cmds = append(cmds, m.println(fmt.Sprintf("%s board check %s",
 					m.styles.infoIcon.Render("◌"),
 					m.styles.subtle.Render(fmt.Sprintf("(head #%d, no new messages)", ev.BoardHead)),
 				)))
@@ -551,16 +564,23 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.agyStatus = "coordinating swarm"
 
 		case AgyEventTool:
-			if ev.ToolState == "ACTIVE" {
+			if ev.ToolName == "swarm_wait" && ev.ToolState == "ACTIVE" {
+				m.waitingSince = time.Now()
+				m.agyStatus = "waiting for a worker to report"
+				cmds = append(cmds, m.println(fmt.Sprintf("%s coordinator is waiting for a worker to post %s",
+					m.styles.infoIcon.Render("◌"),
+					m.styles.subtle.Render("@coordinator"),
+				)))
+			} else if ev.ToolState == "ACTIVE" {
 				m.agyStatus = ev.ToolSummary
 				if ev.ToolName == "run_command" && ev.ToolSummary != "" {
-					cmds = append(cmds, tea.Println(fmt.Sprintf("%s %s", m.styles.swarmName.Render("▸"), ev.ToolSummary)))
+					cmds = append(cmds, m.println(fmt.Sprintf("%s %s", m.styles.swarmName.Render("▸"), ev.ToolSummary)))
 				} else if ev.ToolName != "swarm" && ev.ToolName != "read_board" && ev.ToolName != "post_message" && ev.ToolSummary != "" {
-					cmds = append(cmds, tea.Println(fmt.Sprintf("%s %s", m.styles.infoIcon.Render("◌"), m.styles.subtle.Render(ev.ToolSummary))))
+					cmds = append(cmds, m.println(fmt.Sprintf("%s %s", m.styles.infoIcon.Render("◌"), m.styles.subtle.Render(ev.ToolSummary))))
 				}
 			} else {
 				if ev.ErrorText != "" {
-					cmds = append(cmds, tea.Println(fmt.Sprintf("%s %s: %s", m.styles.errIcon.Render("!"), ev.ToolName, oneLinePreview(ev.ErrorText, 120))))
+					cmds = append(cmds, m.println(fmt.Sprintf("%s %s: %s", m.styles.errIcon.Render("!"), ev.ToolName, oneLinePreview(ev.ErrorText, 120))))
 				} else if ev.ToolName == "run_command" {
 					dur := ""
 					if ev.DurationSeconds > 0 {
@@ -571,9 +591,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						if ev.ToolOutput != "" {
 							msgText += ": " + ev.ToolOutput
 						}
-						cmds = append(cmds, tea.Println(fmt.Sprintf("  %s %s%s", m.styles.errIcon.Render("✗"), m.styles.errBox.Render(msgText), m.styles.subtle.Render(dur))))
+						cmds = append(cmds, m.println(fmt.Sprintf("  %s %s%s", m.styles.errIcon.Render("✗"), m.styles.errBox.Render(msgText), m.styles.subtle.Render(dur))))
 					} else if ev.ToolOutput != "" {
-						cmds = append(cmds, tea.Println(fmt.Sprintf("  %s %s%s", m.styles.okIcon.Render("✓"), m.styles.subtle.Render(ev.ToolOutput), m.styles.subtle.Render(dur))))
+						cmds = append(cmds, m.println(fmt.Sprintf("  %s %s%s", m.styles.okIcon.Render("✓"), m.styles.subtle.Render(ev.ToolOutput), m.styles.subtle.Render(dur))))
 					}
 				}
 				if len(m.workerOrder) > 0 {
@@ -590,7 +610,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if idx := strings.LastIndex(m.lineBuf, "\n"); idx >= 0 {
 				ready := m.lineBuf[:idx]
 				m.lineBuf = m.lineBuf[idx+1:]
-				cmds = append(cmds, tea.Println(ready))
+				cmds = append(cmds, m.println(ready))
 			}
 
 		case AgyEventResult:
@@ -630,7 +650,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			errStr := oneLinePreview(msg.err.Error(), 96)
 			if errStr != m.lastPollErr {
 				m.lastPollErr = errStr
-				cmds = append(cmds, tea.Println(fmt.Sprintf("%s ax status check failed: %s",
+				cmds = append(cmds, m.println(fmt.Sprintf("%s ax status check failed: %s",
 					m.styles.warnIcon.Render("!"),
 					m.styles.subtle.Render(errStr),
 				)))
@@ -645,10 +665,10 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if !existed {
 					m.taskFirstSeen[t.Step] = now
 					m.taskStateSince[t.Step] = now
-					cmds = append(cmds, tea.Println(m.formatTaskCreated(t.Name, t.State)))
+					cmds = append(cmds, m.println(m.formatTaskCreated(t.Name, t.State)))
 				} else if prev != t.State {
 					m.taskStateSince[t.Step] = now
-					cmds = append(cmds, tea.Println(m.formatTaskTransition(t.Name, prev, t.State)))
+					cmds = append(cmds, m.println(m.formatTaskTransition(t.Name, prev, t.State)))
 				}
 			}
 			for step := range m.prevTaskStates {
@@ -657,7 +677,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if started, ok := m.taskFirstSeen[step]; ok {
 						ran = fmt.Sprintf(" (ran %s)", formatElapsed(now.Sub(started)))
 					}
-					cmds = append(cmds, tea.Println(fmt.Sprintf("%s ax task %s deleted%s",
+					cmds = append(cmds, m.println(fmt.Sprintf("%s ax task %s deleted%s",
 						m.styles.okIcon.Render("✓"),
 						m.styles.swarmName.Render(m.cfg.Name+"-"+step),
 						m.styles.subtle.Render(ran),
@@ -665,6 +685,20 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					delete(m.taskFirstSeen, step)
 					delete(m.taskStateSince, step)
 				}
+			}
+			changed := len(seenNow) != len(m.prevTaskStates)
+			for step, st := range seenNow {
+				if m.prevTaskStates[step] != st {
+					changed = true
+				}
+			}
+			if changed {
+				m.lastActivity = now
+				m.idleWarned = false
+			}
+			if idle := now.Sub(m.lastActivity); !m.lastActivity.IsZero() && idle >= idleWarnAfter && !m.idleWarned {
+				m.idleWarned = true
+				cmds = append(cmds, m.println(m.styles.warnIcon.Render("!")+" "+m.styles.subtle.Render(m.idleMessage(idle, now))))
 			}
 			m.prevTaskStates = seenNow
 			m.tasks = msg.tasks
@@ -682,7 +716,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.err == nil {
-			return m, tea.Println(fmt.Sprintf("%s ax-swarm resumed ax task %s",
+			return m, m.println(fmt.Sprintf("%s ax-swarm resumed ax task %s",
 				m.styles.swarmName.Render("↻"),
 				m.styles.swarmName.Render(msg.name),
 			))
@@ -693,7 +727,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.resumeErrShown[msg.name] = true
-		return m, tea.Println(fmt.Sprintf("%s could not resume ax task %s: %s",
+		return m, m.println(fmt.Sprintf("%s could not resume ax task %s: %s",
 			m.styles.warnIcon.Render("!"),
 			m.styles.swarmName.Render(msg.name),
 			m.styles.subtle.Render(oneLinePreview(msg.err.Error(), 100)),
@@ -907,6 +941,9 @@ func (m tuiModel) View() string {
 		}
 		if tbl := m.renderSwarmTable(); tbl != "" {
 			b.WriteString(tbl + "\n")
+			if note := m.rosterNote(time.Now()); note != "" {
+				b.WriteString(m.styles.subtle.Render(note) + "\n")
+			}
 		}
 		if m.taskPollCount > 0 {
 			b.WriteString(m.styles.metaKey.Render("ax check") + m.renderAXCheckSummary() + "\n")
@@ -1174,7 +1211,9 @@ func (m tuiModel) renderRunningStatusLine() string {
 	if m.agyModel != "" {
 		parts = append(parts, m.styles.active.Render(m.agyModel))
 	}
-	if m.agyStatus != "" {
+	if !m.waitingSince.IsZero() {
+		parts = append(parts, m.styles.warnIcon.Render(fmt.Sprintf("waiting for a worker to report (%s)", formatElapsed(time.Since(m.waitingSince)))))
+	} else if m.agyStatus != "" {
 		parts = append(parts, m.agyStatus)
 	}
 	parts = append(parts, m.styles.subtle.Render(formatElapsed(time.Since(m.agyStart))))
@@ -1189,6 +1228,46 @@ func (m tuiModel) formatAgyError() string {
 		return fmt.Sprintf("%v (%s)", m.agyErr, m.agyStderr[len(m.agyStderr)-1])
 	}
 	return m.agyErr.Error()
+}
+
+// idleWarnAfter is how long the swarm may show no activity before ax-swarm
+// explains what it is waiting on.
+const idleWarnAfter = 90 * time.Second
+
+func (m tuiModel) idleMessage(idle time.Duration, now time.Time) string {
+	msg := fmt.Sprintf("no swarm activity for %s.", formatElapsed(idle))
+	if !m.waitingSince.IsZero() {
+		msg += " The coordinator is waiting for a worker to post @coordinator; if workers finished without reporting, it will keep waiting."
+	} else {
+		msg += " Workers may still be busy in their own sessions."
+	}
+	if note := m.rosterNote(now); note != "" {
+		msg += " " + capitalizeFirst(note) + "."
+	}
+	return msg + " Press ctrl+c to stop and clean up."
+}
+
+// rosterNote says how fresh the worker states in the table are: they are only
+// updated when the coordinator runs `swarm status`.
+func (m tuiModel) rosterNote(now time.Time) string {
+	if len(m.workerOrder) == 0 {
+		return ""
+	}
+	if m.rosterAt.IsZero() {
+		return "worker states are as of when each worker was added"
+	}
+	return fmt.Sprintf("worker states are from the last swarm status, %s ago", formatElapsed(now.Sub(m.rosterAt)))
+}
+
+// println prints a line above the live view. Bubble Tea assumes each printed
+// line takes one terminal row, so a line wider than the terminal would wrap,
+// throw off its row accounting, and leave fragments of the live view behind.
+// Wrapping to the terminal width ourselves avoids that.
+func (m tuiModel) println(s string) tea.Cmd {
+	if m.width > 1 {
+		s = ansi.Wrap(s, m.width-1, " ")
+	}
+	return tea.Println(s)
 }
 
 // renderError formats an error so the whole message stays visible: it is
