@@ -459,6 +459,7 @@ func runHeadless(cfg Config, env *SwarmEnv, stdin io.Reader, stdout, stderr io.W
 	go func() {
 		defer pollWG.Done()
 		prev := make(map[string]string)
+		firstSeen := make(map[string]time.Time)
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
 		for {
@@ -470,16 +471,25 @@ func runHeadless(cfg Config, env *SwarmEnv, stdin io.Reader, stdout, stderr io.W
 				if pollErr != nil {
 					continue
 				}
+				now := time.Now()
 				curr := make(map[string]string, len(tasks))
 				for _, t := range tasks {
 					curr[t.Step] = t.State
-					if old, ok := prev[t.Step]; !ok || old != t.State {
-						ui.Log(fmt.Sprintf("ax task %s (%s)", t.Step, t.State))
+					if old, ok := prev[t.Step]; !ok {
+						firstSeen[t.Step] = now
+						ui.Log(fmt.Sprintf("+ ax task %s created (%s)", t.Name, t.State))
+					} else if old != t.State {
+						ui.Log(fmt.Sprintf("▶ ax task %s: %s → %s", t.Name, old, t.State))
 					}
 				}
 				for step := range prev {
 					if _, ok := curr[step]; !ok {
-						ui.Log(fmt.Sprintf("ax task %s (finished)", step))
+						ran := ""
+						if started, ok := firstSeen[step]; ok {
+							ran = fmt.Sprintf(" (ran %s)", formatElapsed(now.Sub(started)))
+							delete(firstSeen, step)
+						}
+						ui.Log(fmt.Sprintf("✓ ax task %s-%s deleted%s", cfg.Name, step, ran))
 					}
 				}
 				prev = curr
@@ -500,15 +510,35 @@ func runHeadless(cfg Config, env *SwarmEnv, stdin io.Reader, stdout, stderr io.W
 
 	for ev := range events {
 		switch ev.Kind {
+		case AgyEventInit:
+			if ev.Model != "" {
+				ui.Log(fmt.Sprintf("▸ started agy /swarm (%s)", ev.Model))
+			}
 		case AgyEventSwarmTitle:
-			ui.Log("swarm: " + ev.SwarmTitle)
+			ui.Log("◆ " + ev.SwarmTitle)
 		case AgyEventSwarmWorker:
 			if ev.WorkerState == "killed" {
-				ui.Log("worker stopped: " + ev.WorkerName)
+				ui.Log("× worker stopped: " + ev.WorkerName)
 			} else {
-				ui.Log("worker added: " + ev.WorkerName)
+				ui.Log("+ worker " + ev.WorkerName)
+			}
+		case AgyEventSwarmRoster:
+			var parts []string
+			for _, mem := range ev.Members {
+				if mem.Role == "coordinator" {
+					continue
+				}
+				st := mem.State
+				if mem.Killed {
+					st = "killed"
+				}
+				parts = append(parts, fmt.Sprintf("%s=%s", mem.Name, st))
+			}
+			if len(parts) > 0 {
+				ui.Log("◌ swarm status: " + strings.Join(parts, ", "))
 			}
 		case AgyEventBoardMessages:
+			printed := 0
 			for _, bm := range ev.BoardMessages {
 				if bm.Seq > 0 {
 					if seenSeq[bm.Seq] {
@@ -517,12 +547,24 @@ func runHeadless(cfg Config, env *SwarmEnv, stdin io.Reader, stdout, stderr io.W
 					seenSeq[bm.Seq] = true
 				}
 				ui.Log(fmt.Sprintf("#%d [%s] %s", bm.Seq, bm.Agent, oneLinePreview(bm.Text, 120)))
+				printed++
+			}
+			if printed == 0 && ev.BoardHead > 0 {
+				ui.Log(fmt.Sprintf("◌ board check (head #%d, no new messages)", ev.BoardHead))
 			}
 		case AgyEventTool:
 			if ev.ToolState == "ACTIVE" && ev.ToolName == "run_command" && ev.ToolSummary != "" {
 				ui.Log("▸ " + ev.ToolSummary)
-			} else if ev.ToolState != "ACTIVE" && ev.ErrorText != "" {
-				ui.Log(fmt.Sprintf("! %s: %s", ev.ToolName, oneLinePreview(ev.ErrorText, 120)))
+			} else if ev.ToolState != "ACTIVE" {
+				if ev.ErrorText != "" {
+					ui.Log(fmt.Sprintf("! %s: %s", ev.ToolName, oneLinePreview(ev.ErrorText, 120)))
+				} else if ev.ToolName == "run_command" {
+					if ev.HasExitCode && ev.ToolExitCode != 0 {
+						ui.Log(fmt.Sprintf("  ✗ exit %d: %s", ev.ToolExitCode, ev.ToolOutput))
+					} else if ev.ToolOutput != "" {
+						ui.Log("  ✓ " + ev.ToolOutput)
+					}
+				}
 			}
 		case AgyEventText:
 			streamed.WriteString(ev.Text)

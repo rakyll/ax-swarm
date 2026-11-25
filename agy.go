@@ -95,12 +95,16 @@ type AgyEvent struct {
 	ToolName        string
 	ToolState       string
 	ToolSummary     string
+	ToolOutput      string
+	ToolExitCode    int
+	HasExitCode     bool
 	SwarmTitle      string
 	WorkerName      string
 	WorkerBrief     string
 	WorkerState     string
 	Members         []SwarmMemberInfo
 	BoardMessages   []SwarmBoardMessage
+	BoardHead       int
 	Status          string
 	Response        string
 	ErrorText       string
@@ -322,11 +326,12 @@ func parseToolStepUpdate(st *rawAgyStep) (AgyEvent, bool) {
 
 	case "read_board":
 		if st.State == "DONE" {
-			if msgs, ok := parseBoardMessagesOutput(output); ok && len(msgs) > 0 {
+			if msgs, head, ok := parseBoardMessagesOutput(output); ok {
 				return AgyEvent{
 					Kind:           AgyEventBoardMessages,
 					ConversationID: st.ConversationID,
 					BoardMessages:  msgs,
+					BoardHead:      head,
 				}, true
 			}
 		}
@@ -350,6 +355,7 @@ func parseToolStepUpdate(st *rawAgyStep) (AgyEvent, bool) {
 					BoardMessages: []SwarmBoardMessage{
 						{Seq: seq, Agent: "coordinator", Text: txt},
 					},
+					BoardHead: seq,
 				}, true
 			}
 		}
@@ -366,7 +372,7 @@ func parseToolStepUpdate(st *rawAgyStep) (AgyEvent, bool) {
 	case "run_command":
 		cmdLine := paramString(params, "CommandLine")
 		summary := summarizeCommand(cmdLine)
-		return AgyEvent{
+		ev := AgyEvent{
 			Kind:            AgyEventTool,
 			ConversationID:  st.ConversationID,
 			ToolName:        name,
@@ -374,7 +380,11 @@ func parseToolStepUpdate(st *rawAgyStep) (AgyEvent, bool) {
 			ToolSummary:     summary,
 			ErrorText:       toolErr,
 			DurationSeconds: st.DurationSeconds,
-		}, true
+		}
+		if st.State == "DONE" {
+			ev.ToolExitCode, ev.HasExitCode, ev.ToolOutput = parseCommandOutputSummary(output)
+		}
+		return ev, true
 
 	default:
 		summary := name
@@ -431,18 +441,19 @@ func parseSwarmStatusOutput(output string) ([]SwarmMemberInfo, string, bool) {
 	return payload.Members, payload.Title, true
 }
 
-func parseBoardMessagesOutput(output string) ([]SwarmBoardMessage, bool) {
+func parseBoardMessagesOutput(output string) ([]SwarmBoardMessage, int, bool) {
 	raw, ok := extractJSONObject(output)
 	if !ok {
-		return nil, false
+		return nil, 0, false
 	}
 	var payload struct {
 		Messages []SwarmBoardMessage `json:"messages"`
+		Head     int                 `json:"head"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		return nil, false
+		return nil, 0, false
 	}
-	return payload.Messages, true
+	return payload.Messages, payload.Head, true
 }
 
 func parsePostedSeq(output string) int {
@@ -460,17 +471,82 @@ func parsePostedSeq(output string) int {
 }
 
 func summarizeCommand(cmdLine string) string {
-	first := strings.TrimSpace(cmdLine)
+	trimmed := strings.TrimSpace(cmdLine)
+	if trimmed == "" {
+		return "run_command"
+	}
+	first := trimmed
 	if idx := strings.IndexByte(first, '\n'); idx >= 0 {
 		first = strings.TrimSpace(first[:idx])
 	}
-	if first == "" {
-		return "run_command"
+	// Make `ax apply -f -` heredocs immediately readable by extracting kind and name.
+	if strings.Contains(first, "apply -f -") {
+		kind, name := extractYAMLKindAndName(trimmed)
+		if kind != "" && name != "" {
+			return fmt.Sprintf("ax apply %s %s", kind, name)
+		}
+		if name != "" {
+			return "ax apply " + name
+		}
 	}
-	if len(first) > 72 {
-		return first[:71] + "…"
+	if len(first) > 84 {
+		return first[:83] + "…"
 	}
 	return first
+}
+
+func extractYAMLKindAndName(s string) (kind, name string) {
+	inMetadata := false
+	for _, rawLine := range strings.Split(s, "\n") {
+		line := strings.TrimSpace(rawLine)
+		if strings.HasPrefix(line, "kind:") && kind == "" {
+			kind = strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "kind:")), `"'`)
+		}
+		if line == "metadata:" {
+			inMetadata = true
+			continue
+		}
+		if inMetadata {
+			if !strings.HasPrefix(rawLine, " ") && !strings.HasPrefix(rawLine, "\t") && line != "" {
+				inMetadata = false
+				continue
+			}
+			if strings.HasPrefix(line, "name:") && name == "" {
+				name = strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "name:")), `"'`)
+			}
+		}
+	}
+	return kind, name
+}
+
+func parseCommandOutputSummary(output string) (exitCode int, hasExit bool, preview string) {
+	lines := strings.Split(strings.ReplaceAll(output, "\r\n", "\n"), "\n")
+	inOutput := false
+	for _, raw := range lines {
+		line := strings.TrimSpace(raw)
+		if !inOutput {
+			if strings.HasPrefix(line, "Command exited with code ") {
+				rest := strings.TrimSuffix(strings.TrimPrefix(line, "Command exited with code "), ".")
+				var code int
+				if _, err := fmt.Sscanf(rest, "%d", &code); err == nil {
+					exitCode = code
+					hasExit = true
+				}
+			}
+			if line == "Command output:" {
+				inOutput = true
+			}
+			continue
+		}
+		if line != "" {
+			if len(line) > 96 {
+				line = line[:95] + "…"
+			}
+			preview = line
+			break
+		}
+	}
+	return exitCode, hasExit, preview
 }
 
 // StartAgyStream launches `agy` in the background (with stdin detached so it

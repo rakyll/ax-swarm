@@ -70,6 +70,11 @@ func TestParseAgyStreamLine(t *testing.T) {
 		t.Fatalf("unexpected tool event: %+v ok=%v", ev, ok)
 	}
 
+	ev, ok = parseAgyStreamLine(`{"event":"step_update","step_update":{"step_type":"tool","state":"DONE","tool_name":"run_command","duration_seconds":0.35,"tool_info":{"name":"run_command","parameters":{"CommandLine":"ax -a default apply -f - <<'EOF'\napiVersion: ax.io/v1alpha1\nkind: Task\nmetadata:\n  name: swarm-1-api\nspec:\n  debug: true\nEOF"},"output":"Created At: t\nCompleted At: t\nCommand exited with code 0.\n\nCommand output:\ntask.ax.io/swarm-1-api created\n"}}}`)
+	if !ok || ev.Kind != AgyEventTool || ev.ToolSummary != "ax apply Task swarm-1-api" || !ev.HasExitCode || ev.ToolExitCode != 0 || ev.ToolOutput != "task.ax.io/swarm-1-api created" {
+		t.Fatalf("unexpected ax apply done event: %+v ok=%v", ev, ok)
+	}
+
 	ev, ok = parseAgyStreamLine(`{"event":"step_update","step_update":{"step_type":"tool","state":"DONE","tool_name":"swarm","tool_info":{"name":"swarm","parameters":{"action":"title","title":"Audit chalk"}}}}`)
 	if !ok || ev.Kind != AgyEventSwarmTitle || ev.SwarmTitle != "Audit chalk" {
 		t.Fatalf("unexpected swarm title event: %+v ok=%v", ev, ok)
@@ -86,7 +91,7 @@ func TestParseAgyStreamLine(t *testing.T) {
 	}
 
 	ev, ok = parseAgyStreamLine(`{"event":"step_update","step_update":{"step_type":"tool","state":"DONE","tool_name":"read_board","tool_info":{"name":"read_board","output":"Created At: t\nCompleted At: t\n{\"messages\":[{\"seq\":2,\"agent\":\"api-worker\",\"text\":\"@coordinator [done] checked API\"}],\"head\":2}"}}}`)
-	if !ok || ev.Kind != AgyEventBoardMessages || len(ev.BoardMessages) != 1 || ev.BoardMessages[0].Seq != 2 || ev.BoardMessages[0].Agent != "api-worker" {
+	if !ok || ev.Kind != AgyEventBoardMessages || len(ev.BoardMessages) != 1 || ev.BoardMessages[0].Seq != 2 || ev.BoardMessages[0].Agent != "api-worker" || ev.BoardHead != 2 {
 		t.Fatalf("unexpected read_board event: %+v ok=%v", ev, ok)
 	}
 

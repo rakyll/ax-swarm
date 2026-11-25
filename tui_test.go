@@ -215,7 +215,7 @@ func TestTUIHappyPathBackgroundAgyStreaming(t *testing.T) {
 	if strings.Contains(runningView, "Created Gateway") {
 		t.Fatalf("running view should not repeat setup checklist, got:\n%s", runningView)
 	}
-	for _, want := range []string{"Partial", "api-worker (working)", "worker1 (Running", "gemini-4-neon-high"} {
+	for _, want := range []string{"Partial", "api-worker (working)", "worker1 (Running", "#1 · 1 task (1 running)", "gemini-4-neon-high"} {
 		if !strings.Contains(runningView, want) {
 			t.Fatalf("running view missing %q:\n%s", want, runningView)
 		}
