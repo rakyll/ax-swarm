@@ -16,6 +16,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -46,9 +47,7 @@ func TestParseArgsAndDefaults(t *testing.T) {
 
 	var stderr bytes.Buffer
 	cfg, err := parseArgs([]string{
-		"--repo", "https://github.com/chalk/chalk",
-		"--repo", "https://github.com/google/go-cmp",
-		"--setup-cmd", "npm ci",
+		"--workspace", `{"setup":{"git":[{"repo":"https://github.com/chalk/chalk"},{"repo":"https://github.com/google/go-cmp"}],"commands":["npm ci"]}}`,
 		"--allow-host", "api.example.com",
 		"--parallel", "4",
 		"--task-timeout", "900",
@@ -64,12 +63,6 @@ func TestParseArgsAndDefaults(t *testing.T) {
 	if cfg.Goal != "inspect the codebase" {
 		t.Fatalf("Goal = %q, want %q", cfg.Goal, "inspect the codebase")
 	}
-	if !slices.Equal(cfg.Repos, []string{"https://github.com/chalk/chalk", "https://github.com/google/go-cmp"}) {
-		t.Fatalf("Repos = %v", cfg.Repos)
-	}
-	if !slices.Equal(cfg.SetupCmds, []string{"npm ci"}) {
-		t.Fatalf("SetupCmds = %v", cfg.SetupCmds)
-	}
 	if !slices.Equal(cfg.AllowHosts, []string{"api.example.com"}) {
 		t.Fatalf("AllowHosts = %v", cfg.AllowHosts)
 	}
@@ -84,6 +77,13 @@ func TestParseArgsAndDefaults(t *testing.T) {
 	}
 	if err := validateConfig(&cfg, tmp); err != nil {
 		t.Fatalf("validateConfig() unexpected error: %v", err)
+	}
+	ws := WorkspaceManifest(cfg.Name, cfg.Image, cfg.WorkspaceSpec)
+	if got := workspaceRepos(ws); !slices.Equal(got, []string{"https://github.com/chalk/chalk", "https://github.com/google/go-cmp"}) {
+		t.Fatalf("repos = %v", got)
+	}
+	if got := workspaceCommands(ws); !slices.Equal(got, []string{"npm ci"}) {
+		t.Fatalf("commands = %v", got)
 	}
 	if !strings.HasPrefix(cfg.Name, "swarm-") || len(cfg.Name) != len("swarm-")+6 {
 		t.Fatalf("generated Name = %q, want swarm-<6 hex>", cfg.Name)
@@ -103,6 +103,82 @@ func TestTimeoutFlagDurationSyntax(t *testing.T) {
 	}
 	if err := f.Set("-5s"); err == nil {
 		t.Fatalf("expected error for negative duration")
+	}
+}
+
+func TestWorkspaceConfig(t *testing.T) {
+	specImage := "localhost:5001/ax-runner@sha256:" + strings.Repeat("b", 64)
+	defaultImg := "localhost:5001/ax-runner@sha256:" + strings.Repeat("d", 64)
+	path := filepath.Join(t.TempDir(), "ws.json")
+	spec := `{
+	  "profile": {"image": "` + specImage + `", "resources": {"cpu": "2"}},
+	  "setup": {
+	    "git": [{"repo": "https://github.com/chalk/chalk", "ref": "main"}],
+	    "commands": ["npm ci"],
+	    "gateway": {"name": "someone-else"}
+	  }
+	}`
+	if err := os.WriteFile(path, []byte(spec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	parse := func(args ...string) Config {
+		t.Helper()
+		t.Setenv("AX_TASK_IMAGE", defaultImg)
+		cfg, err := parseArgs(append([]string{"--name", "swarm-ws", "--ax-bin", "ax"}, args...), t.TempDir(), &bytes.Buffer{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := validateConfig(&cfg, t.TempDir()); err != nil {
+			t.Fatalf("validateConfig: %v", err)
+		}
+		return cfg
+	}
+
+	// The spec's image wins over the default.
+	cfg := parse("--workspace-config", path)
+	if cfg.Image != specImage {
+		t.Fatalf("Image = %q, want spec image", cfg.Image)
+	}
+	ws := WorkspaceManifest(cfg.Name, cfg.Image, cfg.WorkspaceSpec)
+	if got := workspaceRepos(ws); !slices.Equal(got, []string{"https://github.com/chalk/chalk"}) {
+		t.Fatalf("repos = %v", got)
+	}
+	if got := workspaceCommands(ws); !slices.Equal(got, []string{"npm ci"}) {
+		t.Fatalf("commands = %v", got)
+	}
+	raw, err := json.Marshal(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"name":"swarm-ws"`, `"gateway":{"name":"swarm-ws"}`, `"ref":"main"`, `"resources":{"cpu":"2"}`} {
+		if !strings.Contains(string(raw), want) {
+			t.Fatalf("manifest missing %s: %s", want, raw)
+		}
+	}
+	// The loaded spec itself is not mutated by building manifests.
+	if gw := cfg.WorkspaceSpec["setup"].(map[string]any)["gateway"].(map[string]any); gw["name"] != "someone-else" {
+		t.Fatalf("WorkspaceSpec was mutated: %v", gw)
+	}
+	prompt := BuildSwarmPrompt(cfg, "ax")
+	for _, want := range []string{"https://github.com/chalk/chalk", "`npm ci`"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %s", want)
+		}
+	}
+
+	// Inline JSON and full Workspace manifests are accepted; without
+	// profile.image the default image is used.
+	cfg = parse("--workspace", `{"kind":"Workspace","metadata":{"name":"ignored"},"spec":{"setup":{"commands":["true"]}}}`)
+	if cfg.Image != defaultImg {
+		t.Fatalf("Image = %q, want default", cfg.Image)
+	}
+	ws = WorkspaceManifest(cfg.Name, cfg.Image, cfg.WorkspaceSpec)
+	if got := workspaceCommands(ws); !slices.Equal(got, []string{"true"}) {
+		t.Fatalf("commands = %v", got)
+	}
+	if name := ws["metadata"].(map[string]any)["name"]; name != "swarm-ws" {
+		t.Fatalf("metadata.name = %v", name)
 	}
 }
 
@@ -135,7 +211,6 @@ func TestValidateConfigRejections(t *testing.T) {
 		{"invalid server scheme", func(c *Config) { c.Server = "file:///etc/passwd" }, "--server"},
 		{"unpinned image", func(c *Config) { c.Image = "localhost:5001/ax-runner:latest" }, "AX_TASK_IMAGE"},
 		{"image with spaces", func(c *Config) { c.Image = validImage + " evil" }, "AX_TASK_IMAGE"},
-		{"invalid repo scheme", func(c *Config) { c.Repos = []string{"file:///etc/passwd"} }, "--repo"},
 		{"invalid allow-host", func(c *Config) { c.AllowHosts = []string{"bad host;rm"} }, "--allow-host"},
 		{"zero parallel", func(c *Config) { c.Parallel = 0 }, "--parallel"},
 		{"invalid effort", func(c *Config) { c.Effort = "ultra" }, "--effort"},
@@ -145,6 +220,17 @@ func TestValidateConfigRejections(t *testing.T) {
 		{"control char in ax bin", func(c *Config) { c.AXBin = "ax\nfoo" }, "--ax-bin"},
 		{"malformed allow rule", func(c *Config) { c.AllowRules = []string{"mcp"} }, "--allow"},
 		{"unknown allow action", func(c *Config) { c.AllowRules = []string{"shell(ls)"} }, "--allow"},
+		{"inline workspace not json", func(c *Config) { c.Workspace = "{nope" }, "--workspace"},
+		{"workspace and workspace-config", func(c *Config) { c.Workspace = "{}"; c.WorkspaceConfig = "ws.json" }, "not both"},
+		{"workspace config missing file", func(c *Config) { c.WorkspaceConfig = "/nonexistent/ws.json" }, "--workspace-config"},
+		{"workspace config wrong kind", func(c *Config) { c.Workspace = `{"kind":"Gateway","spec":{}}` }, "--workspace"},
+		{"workspace config bad setup", func(c *Config) { c.Workspace = `{"setup":[]}` }, "--workspace"},
+		{"workspace config bad repo", func(c *Config) {
+			c.Workspace = `{"setup":{"git":[{"repo":"file:///etc/passwd"}]}}`
+		}, "--workspace"},
+		{"workspace config unpinned image", func(c *Config) {
+			c.Workspace = `{"profile":{"image":"localhost:5001/ax-runner:latest"}}`
+		}, "AX_TASK_IMAGE"},
 	}
 
 	for _, tc := range cases {
@@ -180,8 +266,7 @@ func TestDryRun(t *testing.T) {
 	code := run([]string{
 		"--dry-run",
 		"--name", "swarm-dry1",
-		"--image", validImage,
-		"--repo", "https://github.com/chalk/chalk",
+		"--workspace", `{"profile":{"image":"` + validImage + `"},"setup":{"git":[{"repo":"https://github.com/chalk/chalk"}]}}`,
 		"find", "weak", "spots",
 	}, stdinFile, stdoutFile, stderrFile)
 	if code != 0 {
@@ -195,6 +280,9 @@ func TestDryRun(t *testing.T) {
 	}
 	if !strings.Contains(string(errBytes), "dry-run: would create Gateway swarm-dry1") {
 		t.Fatalf("dry-run stderr missing summary: %q", string(errBytes))
+	}
+	if !strings.Contains(string(errBytes), `"repo": "https://github.com/chalk/chalk"`) || !strings.Contains(string(errBytes), validImage) {
+		t.Fatalf("dry-run stderr missing Workspace manifest: %q", string(errBytes))
 	}
 }
 

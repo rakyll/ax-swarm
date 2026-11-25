@@ -30,16 +30,16 @@ import (
 
 func testTUIConfig(goal string) Config {
 	return Config{
-		Goal:         goal,
-		Name:         "swarm-tui01",
-		Atespace:     "default",
-		Image:        "localhost:5001/ax-runner@sha256:" + strings.Repeat("a", 64),
-		Repos:        []string{"https://github.com/chalk/chalk"},
-		Parallel:     8,
-		SetupTimeout: 30 * time.Second,
-		Color:        "never",
-		AXBin:        "ax",
-		AgyBin:       "agy",
+		Goal:          goal,
+		Name:          "swarm-tui01",
+		Atespace:      "default",
+		Image:         "localhost:5001/ax-runner@sha256:" + strings.Repeat("a", 64),
+		WorkspaceSpec: map[string]any{"setup": map[string]any{"git": []any{map[string]any{"repo": "https://github.com/chalk/chalk"}}}},
+		Parallel:      8,
+		SetupTimeout:  30 * time.Second,
+		Color:         "never",
+		AXBin:         "ax",
+		AgyBin:        "agy",
 	}
 }
 

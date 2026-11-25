@@ -41,15 +41,16 @@ func BuildSwarmPrompt(cfg Config, axBaseCmd string) string {
 	fmt.Fprintf(&b, "- Shared Gateway (single per swarm): `%s` (HTTPS egress for GitHub, PyPI, npm, Go proxy)\n", cfg.Name)
 	fmt.Fprintf(&b, "- Base `ax` CLI command: `%s`\n", axBaseCmd)
 	fmt.Fprintf(&b, "- Target max concurrent AX Tasks: `%d`\n", cfg.Parallel)
-	if len(cfg.Repos) > 0 {
+	ws := WorkspaceManifest(cfg.Name, cfg.Image, cfg.WorkspaceSpec)
+	if repos := workspaceRepos(ws); len(repos) > 0 {
 		b.WriteString("- Cloned repositories in `/workspace`:\n")
-		for _, repo := range cfg.Repos {
+		for _, repo := range repos {
 			fmt.Fprintf(&b, "  - `%s`\n", repo)
 		}
 	}
-	if len(cfg.SetupCmds) > 0 {
+	if cmds := workspaceCommands(ws); len(cmds) > 0 {
 		b.WriteString("- Setup commands already applied to `/workspace`:\n")
-		for _, cmd := range cfg.SetupCmds {
+		for _, cmd := range cmds {
 			fmt.Fprintf(&b, "  - `%s`\n", cmd)
 		}
 	}

@@ -8,7 +8,7 @@ Run an [AX](https://github.com/google/ax) workspace swarm driven by Antigravity 
 
 ## How It Works
 
-1. **Setup**: Creates one AX `Gateway` and one AX `Workspace` for the swarm, clones any `--repo` URLs, runs any `--setup-cmd` commands, and waits until the Workspace is ready.
+1. **Setup**: Creates one AX `Gateway` and one AX `Workspace` for the swarm, clones the repos and runs the setup commands from `--workspace` (or `--workspace-config`), and waits until the Workspace is ready.
 2. **Run**: Starts `agy /swarm` in the background (`--output-format stream-json -p`) and streams only outputs from `agy`. The swarm splits up the work and uses `ax` directly to create, resume, run commands in (`ax ssh`), and delete parallel Tasks—all sharing that one Workspace and Gateway.
 3. **Cleanup**: When `agy` finishes (or you press `Ctrl+C`), stops any running background `agy` process and deletes any remaining `<swarm-name>-*` Tasks, the Workspace, and the Gateway unless `--keep` is set.
 
@@ -30,23 +30,22 @@ go install github.com/rakyll/ax-swarm@latest
 
 ```bash
 # Launch with a repository and goal
-ax-swarm --repo https://github.com/chalk/chalk \
+ax-swarm --workspace '{"setup":{"git":[{"repo":"https://github.com/chalk/chalk"}]}}' \
   "Why would I use this library, and what are its weak spots?"
 
 # Omit the goal to enter it interactively in the Bubble Tea prompt
-ax-swarm --repo https://github.com/chalk/chalk
+ax-swarm --workspace '{"setup":{"git":[{"repo":"https://github.com/chalk/chalk"}]}}'
 ```
 
 ### Examples
 
 #### 1. Pre-warmed Workspace snapshot for parallel security & test audits
 
-Install dependencies once during Workspace setup (`--setup-cmd`) so every AX Task forked from the single Workspace snapshot starts with dependencies already installed—no repeated `npm ci` or `pip install` per task:
+Install dependencies once during Workspace setup (`setup.commands`) so every AX Task forked from the single Workspace snapshot starts with dependencies already installed—no repeated `npm ci` or `pip install` per task:
 
 ```bash
 ax-swarm \
-  --repo https://github.com/expressjs/express \
-  --setup-cmd "cd express && npm ci --ignore-scripts" \
+  --workspace '{"setup":{"git":[{"repo":"https://github.com/expressjs/express"}],"commands":["cd express && npm ci --ignore-scripts"]}}' \
   --parallel 6 \
   --model gemini-4-neon-high \
   --effort high \
@@ -55,13 +54,23 @@ ax-swarm \
 
 #### 2. Multi-repository comparative architecture & benchmark study
 
-Clone multiple repositories into the same shared AX Workspace (`--repo` is repeatable) so parallel swarm agents can compare implementations, run cross-library benchmarks, and validate migration paths inside isolated Tasks:
+Clone multiple repositories into the same shared AX Workspace (`setup.git` takes a list) so parallel swarm agents can compare implementations, run cross-library benchmarks, and validate migration paths inside isolated Tasks:
 
 ```bash
+cat > compare.json <<'EOF'
+{
+  "setup": {
+    "git": [
+      { "repo": "https://github.com/chalk/chalk" },
+      { "repo": "https://github.com/alexeyraspopov/picocolors" }
+    ],
+    "commands": ["cd chalk && npm ci && cd ../picocolors && npm ci"]
+  }
+}
+EOF
+
 ax-swarm \
-  --repo https://github.com/chalk/chalk \
-  --repo https://github.com/alexeyraspopov/picocolors \
-  --setup-cmd "cd chalk && npm ci && cd ../picocolors && npm ci" \
+  --workspace-config compare.json \
   --parallel 4 \
   "Compare chalk and picocolors across bundle footprint, ANSI/color-level detection edge cases, TypeScript types, and microbenchmark throughput under Node in /workspace. Produce a migration matrix with measured numbers."
 ```
@@ -73,8 +82,7 @@ Because each AX Task receives its own isolated copy of `/workspace` from the sin
 ```bash
 ax-swarm \
   --name parser-opt \
-  --repo https://github.com/example/json-parser \
-  --setup-cmd "cd json-parser && go test ./..." \
+  --workspace '{"setup":{"git":[{"repo":"https://github.com/example/json-parser"}],"commands":["cd json-parser && go test ./..."]}}' \
   --parallel 4 \
   --keep \
   "Profile the parser benchmarks in /workspace/json-parser, then test 3 independent optimization strategies in separate AX Tasks (zero-alloc scanner, table-driven whitespace skip, pooled AST nodes). Compare ns/op and allocs/op across all tasks and recommend the best patch."
@@ -93,11 +101,10 @@ ax-swarm \
   --context gke-ax-prod \
   --atespace perf-lab \
   --name rust-bench \
-  --repo https://github.com/BurntSushi/ripgrep \
+  --workspace '{"setup":{"git":[{"repo":"https://github.com/BurntSushi/ripgrep"}],"commands":["cd ripgrep && cargo fetch"]}}' \
   --allow-host crates.io \
   --allow-host static.crates.io \
   --allow-host index.crates.io \
-  --setup-cmd "cd ripgrep && cargo fetch" \
   --task-timeout 45m \
   --parallel 8 \
   "Build release binaries and investigate regex engine dispatch performance across literal, Unicode, and multiline search workloads in /workspace/ripgrep."
@@ -108,17 +115,17 @@ ax-swarm \
 When running a high-parallelism swarm where subagents execute many `ax apply` / `ax resume` / `ax ssh` commands, you can inspect the exact `/swarm` prompt with `--dry-run` first, then launch with `--mode auto` (or `--dangerously-skip-permissions` in trusted environments):
 
 ```bash
-# Inspect the generated /swarm prompt and agy command without creating AX resources
+# Inspect the Workspace manifest, /swarm prompt, and agy command without creating AX resources
 ax-swarm --dry-run \
   --name ci-triage \
-  --repo https://github.com/example/service \
+  --workspace '{"setup":{"git":[{"repo":"https://github.com/example/service"}]}}' \
   --parallel 8 \
   "Reproduce the failing integration tests, bisect the regression commit, and verify a minimal fix."
 
 # Launch with auto mode and higher parallelism
 ax-swarm \
   --name ci-triage \
-  --repo https://github.com/example/service \
+  --workspace '{"setup":{"git":[{"repo":"https://github.com/example/service"}]}}' \
   --parallel 8 \
   --mode auto \
   --dangerously-skip-permissions \
@@ -129,10 +136,9 @@ ax-swarm \
 
 | Flag | Default | Description |
 |---|---|---|
-| `--repo` | | Git repository URL cloned into `/workspace` (repeatable) |
-| `--setup-cmd` | | Shell command run during AX Workspace setup (repeatable) |
+| `--workspace` | | Inline AX Workspace spec as JSON (see [Workspace Config](#workspace-config)) |
+| `--workspace-config` | | Path to a JSON file with the AX Workspace spec |
 | `--allow-host` | | Extra HTTPS hostname or `*.domain` allowed through the AX Gateway (repeatable) |
-| `--image` | `$AX_TASK_IMAGE` / `$AX_ROOT/bin/ax-runner.digest` | Digest-pinned runner image (`...@sha256:<64 hex>`) |
 | `--atespace` | `default` | AX atespace name |
 | `--context` | active context | Kubeconfig context passed to `ax --context` |
 | `--server` | `$AX_SERVER` | AX API server address passed to `ax --server` |
@@ -150,7 +156,37 @@ ax-swarm \
 | `--ax-bin` | `$AX_BIN` / `$AX_ROOT/bin/ax` / `ax` | Path to `ax` CLI binary |
 | `--agy-bin` | `$AGY_BIN` / `agy` | Path to `agy` CLI binary |
 | `--color` | `auto` | Color output: `auto`, `always`, `never` (respects `NO_COLOR`) |
-| `--dry-run` | `false` | Print the `agy` command and `/swarm` prompt without creating AX resources or launching `agy` |
+| `--dry-run` | `false` | Print the Workspace manifest, `agy` command, and `/swarm` prompt without creating AX resources or launching `agy` |
+
+### Workspace Config
+
+Pass the AX Workspace spec inline with `--workspace`, or from a file with `--workspace-config`:
+
+```bash
+ax-swarm --workspace '{"setup":{"git":[{"repo":"https://github.com/expressjs/express","depth":1}],"commands":["cd express && npm ci --ignore-scripts"]}}' \
+  "Audit the express middleware for security issues"
+
+ax-swarm --workspace-config workspace.json "Audit the express middleware for security issues"
+```
+
+`workspace.json`:
+
+```json
+{
+  "setup": {
+    "git": [
+      { "repo": "https://github.com/expressjs/express", "depth": 1 }
+    ],
+    "commands": ["cd express && npm ci --ignore-scripts"]
+  }
+}
+```
+
+- Use one of `--workspace` or `--workspace-config`, not both.
+- A full `Workspace` manifest (`{"kind":"Workspace","spec":{...}}`) also works; only its `spec` is used.
+- `ax-swarm` always sets the Workspace name and points `setup.gateway` at the swarm's Gateway.
+- `profile.image` sets the runner image (digest-pinned); without it, `$AX_TASK_IMAGE` or `$AX_ROOT/bin/ax-runner.digest` is used.
+- Use `--dry-run` to print the final Workspace manifest.
 
 ### Permissions
 

@@ -106,25 +106,31 @@ func TestManifests(t *testing.T) {
 		t.Fatalf("unexpected gateway manifest: %s", raw)
 	}
 
-	// Workspace without repos/setupCmds omits setup block so AX skips setup job.
-	wsEmpty := WorkspaceManifest("swarm-abc123", "localhost:5001/ax-runner@sha256:"+strings.Repeat("a", 64), nil, nil)
+	// Workspace without a spec omits the setup block so AX skips the setup job.
+	wsEmpty := WorkspaceManifest("swarm-abc123", "localhost:5001/ax-runner@sha256:"+strings.Repeat("a", 64), nil)
 	spec := wsEmpty["spec"].(map[string]any)
 	if _, hasSetup := spec["setup"]; hasSetup {
-		t.Fatalf("expected no setup block when repos and setupCmds are empty: %#v", wsEmpty)
+		t.Fatalf("expected no setup block without a spec: %#v", wsEmpty)
 	}
 
-	// Workspace with repos and setupCmds sets gateway, git depth=1, and commands.
-	wsFull := WorkspaceManifest("swarm-abc123", "localhost:5001/ax-runner@sha256:"+strings.Repeat("a", 64),
-		[]string{"https://github.com/chalk/chalk"}, []string{"npm ci"})
+	// A spec with setup keeps git and commands and points setup at the swarm's Gateway.
+	base := map[string]any{"setup": map[string]any{
+		"git":      []any{map[string]any{"repo": "https://github.com/chalk/chalk", "depth": 1}},
+		"commands": []any{"npm ci"},
+	}}
+	wsFull := WorkspaceManifest("swarm-abc123", "localhost:5001/ax-runner@sha256:"+strings.Repeat("a", 64), base)
 	rawWS, err := json.Marshal(wsFull)
 	if err != nil {
 		t.Fatalf("marshal workspace: %v", err)
 	}
 	s := string(rawWS)
-	for _, want := range []string{`"gateway":{"name":"swarm-abc123"}`, `"repo":"https://github.com/chalk/chalk"`, `"depth":1`, `"commands":["npm ci"]`} {
+	for _, want := range []string{`"gateway":{"name":"swarm-abc123"}`, `"repo":"https://github.com/chalk/chalk"`, `"depth":1`, `"commands":["npm ci"]`, `"image":"localhost:5001/ax-runner@sha256:`} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("workspace manifest missing %s: %s", want, s)
 		}
+	}
+	if _, ok := base["setup"].(map[string]any)["gateway"]; ok {
+		t.Fatalf("WorkspaceManifest mutated its base spec")
 	}
 }
 
@@ -158,11 +164,11 @@ func TestSwarmEnvSetupAndCleanup(t *testing.T) {
 	ui := newUI(&logs, strings.NewReader(""), false, false)
 
 	cfg := Config{
-		Name:         "swarm-abc123",
-		Atespace:     "default",
-		Image:        "localhost:5001/ax-runner@sha256:" + strings.Repeat("a", 64),
-		Repos:        []string{"https://github.com/chalk/chalk"},
-		SetupTimeout: 5 * time.Second,
+		Name:          "swarm-abc123",
+		Atespace:      "default",
+		Image:         "localhost:5001/ax-runner@sha256:" + strings.Repeat("a", 64),
+		WorkspaceSpec: map[string]any{"setup": map[string]any{"git": []any{map[string]any{"repo": "https://github.com/chalk/chalk"}}}},
+		SetupTimeout:  5 * time.Second,
 	}
 
 	if err := env.Setup(context.Background(), cfg, ui); err != nil {
@@ -254,7 +260,6 @@ func TestSingleWorkspaceAndGatewayPerSwarm(t *testing.T) {
 	env := &SwarmEnv{AX: ax, Name: "swarm-one"}
 
 	img := "localhost:5001/ax-runner@sha256:" + strings.Repeat("c", 64)
-	repos := []string{"https://github.com/chalk/chalk", "https://github.com/google/go-cmp"}
 
 	if err := env.CreateGateway(context.Background(), []string{"api.example.com"}); err != nil {
 		t.Fatalf("first CreateGateway error: %v", err)
@@ -262,10 +267,10 @@ func TestSingleWorkspaceAndGatewayPerSwarm(t *testing.T) {
 	if err := env.CreateGateway(context.Background(), []string{"other.example.com"}); err != nil {
 		t.Fatalf("second CreateGateway error: %v", err)
 	}
-	if err := env.CreateWorkspace(context.Background(), img, repos, []string{"npm ci"}); err != nil {
+	if err := env.CreateWorkspace(context.Background(), Config{Image: img}); err != nil {
 		t.Fatalf("first CreateWorkspace error: %v", err)
 	}
-	if err := env.CreateWorkspace(context.Background(), img, repos, []string{"npm test"}); err != nil {
+	if err := env.CreateWorkspace(context.Background(), Config{Image: img}); err != nil {
 		t.Fatalf("second CreateWorkspace error: %v", err)
 	}
 

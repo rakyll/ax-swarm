@@ -855,7 +855,7 @@ func (m tuiModel) createWorkspaceCmd() tea.Cmd {
 	env := m.env
 	cfg := m.cfg
 	return func() tea.Msg {
-		err := env.CreateWorkspace(ctx, cfg.Image, cfg.Repos, cfg.SetupCmds)
+		err := env.CreateWorkspace(ctx, cfg)
 		return workspaceCreatedMsg{err: err}
 	}
 }
@@ -986,7 +986,7 @@ func (m tuiModel) View() string {
 	}
 	b.WriteString(header + "\n")
 
-	for _, repo := range m.cfg.Repos {
+	for _, repo := range workspaceRepos(map[string]any{"spec": m.cfg.WorkspaceSpec}) {
 		b.WriteString("  " + m.styles.metaKey.Render("repo") + m.styles.metaVal.Render(repo) + "\n")
 	}
 	if m.cfg.Goal != "" {

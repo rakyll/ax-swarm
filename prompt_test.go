@@ -23,12 +23,14 @@ import (
 
 func TestBuildSwarmPrompt(t *testing.T) {
 	cfg := Config{
-		Goal:       "Analyze chalk's API\nand weak spots",
-		Name:       "swarm-abc123",
-		Atespace:   "default",
-		Parallel:   6,
-		Repos:      []string{"https://github.com/chalk/chalk"},
-		SetupCmds:  []string{"npm ci"},
+		Goal:     "Analyze chalk's API\nand weak spots",
+		Name:     "swarm-abc123",
+		Atespace: "default",
+		Parallel: 6,
+		WorkspaceSpec: map[string]any{"setup": map[string]any{
+			"git":      []any{map[string]any{"repo": "https://github.com/chalk/chalk"}},
+			"commands": []any{"npm ci"},
+		}},
 		AutoResume: true,
 	}
 

@@ -353,25 +353,26 @@ func GatewayManifest(name string, extraHosts []string) map[string]any {
 }
 
 // WorkspaceManifest returns the ax.io/v1alpha1 Workspace manifest for the swarm.
-func WorkspaceManifest(name, image string, repos, setupCmds []string) map[string]any {
-	spec := map[string]any{
-		"profile": map[string]any{"image": image},
+//
+// base is the optional Workspace spec from --workspace or --workspace-config;
+// it is deep copied and never modified. image (when non-empty) is set as
+// spec.profile.image, and when there is a setup section its gateway is
+// pointed at the swarm's single Gateway.
+func WorkspaceManifest(name, image string, base map[string]any) map[string]any {
+	spec := deepCopyMap(base)
+	if spec == nil {
+		spec = map[string]any{}
 	}
-	if len(repos) > 0 || len(setupCmds) > 0 {
-		setup := map[string]any{
-			"gateway": map[string]any{"name": name},
+	if image != "" {
+		profile, _ := spec["profile"].(map[string]any)
+		if profile == nil {
+			profile = map[string]any{}
 		}
-		if len(repos) > 0 {
-			gitSpecs := make([]map[string]any, 0, len(repos))
-			for _, r := range repos {
-				gitSpecs = append(gitSpecs, map[string]any{"repo": r, "depth": 1})
-			}
-			setup["git"] = gitSpecs
-		}
-		if len(setupCmds) > 0 {
-			setup["commands"] = setupCmds
-		}
-		spec["setup"] = setup
+		profile["image"] = image
+		spec["profile"] = profile
+	}
+	if setup, ok := spec["setup"].(map[string]any); ok {
+		setup["gateway"] = map[string]any{"name": name}
 	}
 	return map[string]any{
 		"apiVersion": "ax.io/v1alpha1",
@@ -379,6 +380,64 @@ func WorkspaceManifest(name, image string, repos, setupCmds []string) map[string
 		"metadata":   map[string]any{"name": name},
 		"spec":       spec,
 	}
+}
+
+// deepCopyMap copies a JSON-shaped value tree (maps, slices, scalars).
+func deepCopyMap(m map[string]any) map[string]any {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = deepCopyValue(v)
+	}
+	return out
+}
+
+func deepCopyValue(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		return deepCopyMap(t)
+	case []any:
+		out := make([]any, len(t))
+		for i, e := range t {
+			out[i] = deepCopyValue(e)
+		}
+		return out
+	default:
+		return v
+	}
+}
+
+// workspaceRepos returns the git repositories a Workspace manifest clones.
+func workspaceRepos(manifest map[string]any) []string {
+	var out []string
+	for _, e := range workspaceSetupList(manifest, "git") {
+		if m, ok := e.(map[string]any); ok {
+			if r, ok := m["repo"].(string); ok && r != "" {
+				out = append(out, r)
+			}
+		}
+	}
+	return out
+}
+
+// workspaceCommands returns the setup commands of a Workspace manifest.
+func workspaceCommands(manifest map[string]any) []string {
+	var out []string
+	for _, e := range workspaceSetupList(manifest, "commands") {
+		if s, ok := e.(string); ok && s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func workspaceSetupList(manifest map[string]any, key string) []any {
+	spec, _ := manifest["spec"].(map[string]any)
+	setup, _ := spec["setup"].(map[string]any)
+	list, _ := setup[key].([]any)
+	return list
 }
 
 // SwarmEnv tracks the AX resources created for one swarm run.
@@ -404,11 +463,11 @@ func (e *SwarmEnv) CreateGateway(ctx context.Context, allowHosts []string) error
 // CreateWorkspace creates the single shared Workspace for this swarm if it has
 // not already been created. A failed apply still marks the Workspace for
 // cleanup, because AX may have persisted it (e.g. in a Failed phase).
-func (e *SwarmEnv) CreateWorkspace(ctx context.Context, image string, repos, setupCmds []string) error {
+func (e *SwarmEnv) CreateWorkspace(ctx context.Context, cfg Config) error {
 	if e.WorkspaceCreated {
 		return nil
 	}
-	err := e.AX.Apply(ctx, WorkspaceManifest(e.Name, image, repos, setupCmds))
+	err := e.AX.Apply(ctx, WorkspaceManifest(e.Name, cfg.Image, cfg.WorkspaceSpec))
 	e.WorkspaceCreated = true
 	return err
 }
@@ -421,7 +480,7 @@ func (e *SwarmEnv) Setup(ctx context.Context, cfg Config, ui *UI) error {
 	}
 	ui.Log(fmt.Sprintf("%s created Gateway %s", ui.Paint("✓", ansiGreen), e.Name))
 
-	if err := e.CreateWorkspace(ctx, cfg.Image, cfg.Repos, cfg.SetupCmds); err != nil {
+	if err := e.CreateWorkspace(ctx, cfg); err != nil {
 		return err
 	}
 	ui.Log(fmt.Sprintf("%s created Workspace %s; waiting for its setup", ui.Paint("✓", ansiGreen), e.Name))

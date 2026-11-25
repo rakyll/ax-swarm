@@ -19,9 +19,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -50,8 +52,6 @@ var (
 // Config holds all validated runtime configuration for an ax-swarm invocation.
 type Config struct {
 	Goal                       string
-	Repos                      []string
-	SetupCmds                  []string
 	AllowHosts                 []string
 	Image                      string
 	Atespace                   string
@@ -72,6 +72,14 @@ type Config struct {
 	DryRun                     bool
 	AutoResume                 bool
 	AllowRules                 []string
+	// Workspace is the --workspace value: an inline JSON AX Workspace spec.
+	Workspace string
+	// WorkspaceConfig is the --workspace-config value: a path to a JSON file
+	// holding an AX Workspace spec.
+	WorkspaceConfig string
+	// WorkspaceSpec is the parsed spec from Workspace or WorkspaceConfig.
+	// Image is its profile.image, or the default image when unset.
+	WorkspaceSpec map[string]any
 }
 
 type stringSliceFlag []string
@@ -215,7 +223,7 @@ func randomSwarmName() (string, error) {
 
 func parseArgs(args []string, axRoot string, stderr io.Writer) (Config, error) {
 	var cfg Config
-	var repos, setupCmds, allowHosts, allowRules stringSliceFlag
+	var allowHosts, allowRules stringSliceFlag
 	timeout := timeoutFlag(1800 * time.Second)
 
 	fs := flag.NewFlagSet("ax-swarm", flag.ContinueOnError)
@@ -240,10 +248,9 @@ Environment:
 `)
 	}
 
-	fs.Var(&repos, "repo", "git repository URL the AX Workspace clones into /workspace (repeatable)")
-	fs.Var(&setupCmds, "setup-cmd", "shell command run during AX Workspace setup (repeatable)")
 	fs.Var(&allowHosts, "allow-host", "extra HTTPS hostname or *.domain allowed through the AX Gateway (repeatable)")
-	fs.StringVar(&cfg.Image, "image", defaultImage(axRoot), "digest-pinned runner image (default $AX_TASK_IMAGE or $AX_ROOT/bin/ax-runner.digest)")
+	fs.StringVar(&cfg.Workspace, "workspace", "", "inline AX Workspace spec as JSON, e.g. '{\"setup\":{\"git\":[{\"repo\":\"https://github.com/chalk/chalk\"}],\"commands\":[\"npm ci\"]}}'")
+	fs.StringVar(&cfg.WorkspaceConfig, "workspace-config", "", "path to a JSON file with the AX Workspace spec")
 	fs.StringVar(&cfg.Atespace, "atespace", "default", "AX atespace name")
 	fs.StringVar(&cfg.KubeContext, "context", "", "kubeconfig context (default: active context)")
 	fs.StringVar(&cfg.Server, "server", strings.TrimSpace(os.Getenv("AX_SERVER")), "AX API server address (default: $AX_SERVER or auto-detected)")
@@ -259,7 +266,7 @@ Environment:
 	fs.StringVar(&cfg.Mode, "mode", "", "agent mode passed to agy --mode (accept-edits|auto|plan)")
 	fs.StringVar(&cfg.Project, "project", "", "project ID or name passed to agy --project")
 	fs.BoolVar(&cfg.DangerouslySkipPermissions, "dangerously-skip-permissions", false, "pass --dangerously-skip-permissions to agy")
-	fs.BoolVar(&cfg.DryRun, "dry-run", false, "print the agy command and /swarm prompt without creating AX resources or launching agy")
+	fs.BoolVar(&cfg.DryRun, "dry-run", false, "print the Workspace manifest, agy command, and /swarm prompt without creating AX resources or launching agy")
 	fs.BoolVar(&cfg.AutoResume, "auto-resume", true, "automatically resume newly created swarm tasks that are waiting in Suspended")
 	fs.Var(&allowRules, "allow", "extra agy permission rule allowed for this run only, e.g. 'mcp(server/*)' or 'read_url(github.com)' (repeatable)")
 
@@ -267,8 +274,7 @@ Environment:
 		return Config{}, err
 	}
 
-	cfg.Repos = []string(repos)
-	cfg.SetupCmds = []string(setupCmds)
+	cfg.Image = defaultImage(axRoot)
 	cfg.AllowHosts = []string(allowHosts)
 	cfg.AllowRules = []string(allowRules)
 	cfg.SetupTimeout = time.Duration(timeout)
@@ -313,19 +319,36 @@ func validateConfig(cfg *Config, axRoot string) error {
 			return fmt.Errorf("--server %q must be a valid http(s) URL", cfg.Server)
 		}
 	}
-	if cfg.Image == "" || hasControlChars(cfg.Image) || strings.ContainsAny(cfg.Image, " \t") || !imageDigestRe.MatchString(cfg.Image) {
-		return fmt.Errorf("set AX_TASK_IMAGE or --image to a digest-pinned runner image (...@sha256:<64 hex>), or run make build-local-cluster in the AX checkout at %s (set AX_ROOT if it is elsewhere)", axRoot)
+	if cfg.Workspace != "" && cfg.WorkspaceConfig != "" {
+		return fmt.Errorf("use either --workspace or --workspace-config, not both")
 	}
-	for _, repo := range cfg.Repos {
-		if repo == "" || hasControlChars(repo) || strings.ContainsAny(repo, " \t") {
-			return fmt.Errorf("--repo %q is invalid", repo)
+	if cfg.Workspace != "" || cfg.WorkspaceConfig != "" {
+		flagName, data := "--workspace", []byte(cfg.Workspace)
+		if cfg.WorkspaceConfig != "" {
+			flagName = "--workspace-config"
+			var err error
+			if data, err = readWorkspaceConfigFile(cfg.WorkspaceConfig); err != nil {
+				return fmt.Errorf("%s: %w", flagName, err)
+			}
 		}
-		if !strings.HasPrefix(repo, "https://") &&
-			!strings.HasPrefix(repo, "http://") &&
-			!strings.HasPrefix(repo, "ssh://") &&
-			!strings.HasPrefix(repo, "git@") {
-			return fmt.Errorf("--repo %q must use https://, http://, ssh://, or git@ scheme", repo)
+		spec, err := parseWorkspaceSpec(data)
+		if err != nil {
+			return fmt.Errorf("%s: %w", flagName, err)
 		}
+		cfg.WorkspaceSpec = spec
+		if profile, ok := spec["profile"].(map[string]any); ok {
+			if img, ok := profile["image"].(string); ok && img != "" {
+				cfg.Image = img
+			}
+		}
+		for _, repo := range workspaceRepos(map[string]any{"spec": spec}) {
+			if err := validateRepo(repo); err != nil {
+				return fmt.Errorf("%s: %w", flagName, err)
+			}
+		}
+	}
+	if cfg.Image == "" || hasControlChars(cfg.Image) || strings.ContainsAny(cfg.Image, " \t") || !imageDigestRe.MatchString(cfg.Image) {
+		return fmt.Errorf("set profile.image in the Workspace spec or AX_TASK_IMAGE to a digest-pinned runner image (...@sha256:<64 hex>), or run make build-local-cluster in the AX checkout at %s (set AX_ROOT if it is elsewhere)", axRoot)
 	}
 	for _, host := range cfg.AllowHosts {
 		if !hostnameRe.MatchString(host) {
@@ -373,6 +396,79 @@ func validateConfig(cfg *Config, axRoot string) error {
 	return nil
 }
 
+func validateRepo(repo string) error {
+	if repo == "" || hasControlChars(repo) || strings.ContainsAny(repo, " \t") {
+		return fmt.Errorf("repo %q is invalid", repo)
+	}
+	if !strings.HasPrefix(repo, "https://") &&
+		!strings.HasPrefix(repo, "http://") &&
+		!strings.HasPrefix(repo, "ssh://") &&
+		!strings.HasPrefix(repo, "git@") {
+		return fmt.Errorf("repo %q must use https://, http://, ssh://, or git@ scheme", repo)
+	}
+	return nil
+}
+
+// maxWorkspaceConfigBytes bounds the size of a Workspace spec.
+const maxWorkspaceConfigBytes = 1 << 20
+
+// readWorkspaceConfigFile reads a --workspace-config JSON file.
+func readWorkspaceConfigFile(path string) ([]byte, error) {
+	f, err := os.Open(expandHome(path))
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxWorkspaceConfigBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxWorkspaceConfigBytes {
+		return nil, fmt.Errorf("%s is larger than %d bytes", path, maxWorkspaceConfigBytes)
+	}
+	return data, nil
+}
+
+// parseWorkspaceSpec parses an AX Workspace spec from JSON. Either the bare
+// spec ({"profile":...,"setup":...}) or a full Workspace manifest
+// ({"kind":"Workspace","spec":{...}}) is accepted; for a manifest only the
+// spec is used, since ax-swarm owns the name.
+func parseWorkspaceSpec(data []byte) (map[string]any, error) {
+	if len(data) > maxWorkspaceConfigBytes {
+		return nil, fmt.Errorf("larger than %d bytes", maxWorkspaceConfigBytes)
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	var spec map[string]any
+	if err := dec.Decode(&spec); err != nil {
+		return nil, fmt.Errorf("invalid JSON: %w", err)
+	}
+	if dec.More() {
+		return nil, fmt.Errorf("invalid JSON: unexpected data after the top-level object")
+	}
+	if spec == nil {
+		return nil, fmt.Errorf("must be a JSON object")
+	}
+	if kind, ok := spec["kind"]; ok {
+		if kind != "Workspace" {
+			return nil, fmt.Errorf("kind is %v, want Workspace", kind)
+		}
+		inner, ok := spec["spec"].(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("workspace manifest has no spec object")
+		}
+		spec = inner
+	}
+	for _, key := range []string{"profile", "setup"} {
+		if v, ok := spec[key]; ok {
+			if _, isObj := v.(map[string]any); !isObj {
+				return nil, fmt.Errorf("%s must be an object", key)
+			}
+		}
+	}
+	return spec, nil
+}
+
 func run(args []string, stdin *os.File, stdout, stderr *os.File) int {
 	axRoot := defaultAXRoot()
 	cfg, err := parseArgs(args, axRoot, stderr)
@@ -417,6 +513,9 @@ func run(args []string, stdin *os.File, stdout, stderr *os.File) int {
 		agyArgs := BuildAgyArgs(cfg, swarmPrompt)
 		fmt.Fprintf(stderr, "dry-run: would create Gateway %s and Workspace %s (atespace=%s, image=%s)\n",
 			cfg.Name, cfg.Name, cfg.Atespace, cfg.Image)
+		if wsJSON, err := json.MarshalIndent(WorkspaceManifest(cfg.Name, cfg.Image, cfg.WorkspaceSpec), "", "  "); err == nil {
+			fmt.Fprintf(stderr, "dry-run: Workspace manifest:\n%s\n", wsJSON)
+		}
 		fmt.Fprintf(stderr, "dry-run: would run: %s", shellQuote(cfg.AgyBin))
 		for _, a := range agyArgs[:len(agyArgs)-1] {
 			fmt.Fprintf(stderr, " %s", shellQuote(a))
