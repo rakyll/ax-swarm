@@ -59,10 +59,32 @@ const (
 	AgyEventInit AgyEventKind = iota
 	AgyEventText
 	AgyEventTool
+	AgyEventSwarmTitle
+	AgyEventSwarmWorker
+	AgyEventSwarmRoster
+	AgyEventBoardMessages
+	AgyEventActivity
 	AgyEventResult
 	AgyEventStderr
 	AgyEventDone
 )
+
+// SwarmMemberInfo describes a member reported by `agy /swarm`.
+type SwarmMemberInfo struct {
+	Name   string `json:"name"`
+	Role   string `json:"role"`
+	State  string `json:"state"`
+	Model  string `json:"model"`
+	Killed bool   `json:"killed"`
+}
+
+// SwarmBoardMessage describes a board message returned by `read_board` or `post_message`.
+type SwarmBoardMessage struct {
+	Seq   int    `json:"seq"`
+	Agent string `json:"agent"`
+	Text  string `json:"text"`
+	Time  string `json:"time"`
+}
 
 // AgyEvent represents a single parsed event from `agy --output-format stream-json`.
 type AgyEvent struct {
@@ -72,6 +94,13 @@ type AgyEvent struct {
 	Text            string
 	ToolName        string
 	ToolState       string
+	ToolSummary     string
+	SwarmTitle      string
+	WorkerName      string
+	WorkerBrief     string
+	WorkerState     string
+	Members         []SwarmMemberInfo
+	BoardMessages   []SwarmBoardMessage
 	Status          string
 	Response        string
 	ErrorText       string
@@ -156,32 +185,7 @@ func parseAgyStreamLine(line string) (AgyEvent, bool) {
 		if env.StepUpdate == nil {
 			return AgyEvent{}, false
 		}
-		st := env.StepUpdate
-		switch st.StepType {
-		case "agent_response":
-			if st.TextDelta == "" {
-				return AgyEvent{}, false
-			}
-			return AgyEvent{
-				Kind:           AgyEventText,
-				ConversationID: st.ConversationID,
-				Text:           st.TextDelta,
-			}, true
-		case "tool":
-			name := st.ToolName
-			if name == "" && st.ToolInfo != nil {
-				name = st.ToolInfo.Name
-			}
-			return AgyEvent{
-				Kind:            AgyEventTool,
-				ConversationID:  st.ConversationID,
-				ToolName:        name,
-				ToolState:       st.State,
-				DurationSeconds: st.DurationSeconds,
-			}, true
-		default:
-			return AgyEvent{}, false
-		}
+		return parseStepUpdate(env.StepUpdate)
 
 	case "result":
 		if env.Result == nil {
@@ -204,6 +208,269 @@ func parseAgyStreamLine(line string) (AgyEvent, bool) {
 		}
 		return AgyEvent{}, false
 	}
+}
+
+func parseStepUpdate(st *rawAgyStep) (AgyEvent, bool) {
+	switch st.StepType {
+	case "agent_response":
+		if st.TextDelta != "" {
+			return AgyEvent{
+				Kind:           AgyEventText,
+				ConversationID: st.ConversationID,
+				Text:           st.TextDelta,
+			}, true
+		}
+		if st.State == "DONE" {
+			return AgyEvent{
+				Kind:           AgyEventActivity,
+				ConversationID: st.ConversationID,
+				Text:           "planning",
+			}, true
+		}
+		return AgyEvent{}, false
+
+	case "system_message":
+		return AgyEvent{
+			Kind:           AgyEventActivity,
+			ConversationID: st.ConversationID,
+			Text:           "swarm update received",
+		}, true
+
+	case "tool":
+		return parseToolStepUpdate(st)
+
+	default:
+		return AgyEvent{}, false
+	}
+}
+
+func parseToolStepUpdate(st *rawAgyStep) (AgyEvent, bool) {
+	name := st.ToolName
+	var params map[string]any
+	var output, toolErr string
+	if st.ToolInfo != nil {
+		if name == "" {
+			name = st.ToolInfo.Name
+		}
+		params = st.ToolInfo.Parameters
+		output = st.ToolInfo.Output
+		toolErr = st.ToolInfo.Error
+	}
+	if toolErr == "" {
+		toolErr = st.Error
+	}
+
+	switch name {
+	case "swarm":
+		action := paramString(params, "action")
+		if st.State == "DONE" {
+			switch action {
+			case "title":
+				if title := paramString(params, "title"); title != "" {
+					return AgyEvent{
+						Kind:           AgyEventSwarmTitle,
+						ConversationID: st.ConversationID,
+						SwarmTitle:     title,
+					}, true
+				}
+			case "add":
+				if wName := paramString(params, "name"); wName != "" {
+					return AgyEvent{
+						Kind:           AgyEventSwarmWorker,
+						ConversationID: st.ConversationID,
+						WorkerName:     wName,
+						WorkerBrief:    paramString(params, "brief"),
+						WorkerState:    "working",
+					}, true
+				}
+			case "kill":
+				if wName := paramString(params, "name"); wName != "" {
+					return AgyEvent{
+						Kind:           AgyEventSwarmWorker,
+						ConversationID: st.ConversationID,
+						WorkerName:     wName,
+						WorkerState:    "killed",
+					}, true
+				}
+			case "status":
+				if roster, title, ok := parseSwarmStatusOutput(output); ok {
+					return AgyEvent{
+						Kind:           AgyEventSwarmRoster,
+						ConversationID: st.ConversationID,
+						SwarmTitle:     title,
+						Members:        roster,
+					}, true
+				}
+			}
+		}
+		summary := "swarm"
+		if action != "" {
+			summary = "swarm:" + action
+			if wName := paramString(params, "name"); wName != "" {
+				summary += " " + wName
+			}
+		}
+		return AgyEvent{
+			Kind:            AgyEventTool,
+			ConversationID:  st.ConversationID,
+			ToolName:        name,
+			ToolState:       st.State,
+			ToolSummary:     summary,
+			ErrorText:       toolErr,
+			DurationSeconds: st.DurationSeconds,
+		}, true
+
+	case "read_board":
+		if st.State == "DONE" {
+			if msgs, ok := parseBoardMessagesOutput(output); ok && len(msgs) > 0 {
+				return AgyEvent{
+					Kind:           AgyEventBoardMessages,
+					ConversationID: st.ConversationID,
+					BoardMessages:  msgs,
+				}, true
+			}
+		}
+		return AgyEvent{
+			Kind:            AgyEventTool,
+			ConversationID:  st.ConversationID,
+			ToolName:        name,
+			ToolState:       st.State,
+			ToolSummary:     "reading swarm board",
+			ErrorText:       toolErr,
+			DurationSeconds: st.DurationSeconds,
+		}, true
+
+	case "post_message":
+		if st.State == "DONE" {
+			if txt := paramString(params, "text"); txt != "" {
+				seq := parsePostedSeq(output)
+				return AgyEvent{
+					Kind:           AgyEventBoardMessages,
+					ConversationID: st.ConversationID,
+					BoardMessages: []SwarmBoardMessage{
+						{Seq: seq, Agent: "coordinator", Text: txt},
+					},
+				}, true
+			}
+		}
+		return AgyEvent{
+			Kind:            AgyEventTool,
+			ConversationID:  st.ConversationID,
+			ToolName:        name,
+			ToolState:       st.State,
+			ToolSummary:     "posting to board",
+			ErrorText:       toolErr,
+			DurationSeconds: st.DurationSeconds,
+		}, true
+
+	case "run_command":
+		cmdLine := paramString(params, "CommandLine")
+		summary := summarizeCommand(cmdLine)
+		return AgyEvent{
+			Kind:            AgyEventTool,
+			ConversationID:  st.ConversationID,
+			ToolName:        name,
+			ToolState:       st.State,
+			ToolSummary:     summary,
+			ErrorText:       toolErr,
+			DurationSeconds: st.DurationSeconds,
+		}, true
+
+	default:
+		summary := name
+		if summary == "" {
+			summary = "tool"
+		}
+		return AgyEvent{
+			Kind:            AgyEventTool,
+			ConversationID:  st.ConversationID,
+			ToolName:        name,
+			ToolState:       st.State,
+			ToolSummary:     summary,
+			ErrorText:       toolErr,
+			DurationSeconds: st.DurationSeconds,
+		}, true
+	}
+}
+
+func paramString(params map[string]any, key string) string {
+	if params == nil {
+		return ""
+	}
+	v, ok := params[key]
+	if !ok {
+		return ""
+	}
+	s, _ := v.(string)
+	return strings.TrimSpace(s)
+}
+
+func extractJSONObject(s string) ([]byte, bool) {
+	idx := strings.IndexByte(s, '{')
+	if idx < 0 {
+		return nil, false
+	}
+	return []byte(strings.TrimSpace(s[idx:])), true
+}
+
+func parseSwarmStatusOutput(output string) ([]SwarmMemberInfo, string, bool) {
+	raw, ok := extractJSONObject(output)
+	if !ok {
+		return nil, "", false
+	}
+	var payload struct {
+		Title   string            `json:"title"`
+		Members []SwarmMemberInfo `json:"members"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil, "", false
+	}
+	if len(payload.Members) == 0 && payload.Title == "" {
+		return nil, "", false
+	}
+	return payload.Members, payload.Title, true
+}
+
+func parseBoardMessagesOutput(output string) ([]SwarmBoardMessage, bool) {
+	raw, ok := extractJSONObject(output)
+	if !ok {
+		return nil, false
+	}
+	var payload struct {
+		Messages []SwarmBoardMessage `json:"messages"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil, false
+	}
+	return payload.Messages, true
+}
+
+func parsePostedSeq(output string) int {
+	raw, ok := extractJSONObject(output)
+	if !ok {
+		return 0
+	}
+	var payload struct {
+		Seq int `json:"seq"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return 0
+	}
+	return payload.Seq
+}
+
+func summarizeCommand(cmdLine string) string {
+	first := strings.TrimSpace(cmdLine)
+	if idx := strings.IndexByte(first, '\n'); idx >= 0 {
+		first = strings.TrimSpace(first[:idx])
+	}
+	if first == "" {
+		return "run_command"
+	}
+	if len(first) > 72 {
+		return first[:71] + "…"
+	}
+	return first
 }
 
 // StartAgyStream launches `agy` in the background (with stdin detached so it

@@ -65,9 +65,34 @@ func TestParseAgyStreamLine(t *testing.T) {
 		t.Fatalf("unexpected text delta event: %+v ok=%v", ev, ok)
 	}
 
-	ev, ok = parseAgyStreamLine(`{"event":"step_update","step_update":{"step_type":"tool","state":"ACTIVE","tool_name":"run_command"}}`)
-	if !ok || ev.Kind != AgyEventTool || ev.ToolName != "run_command" || ev.ToolState != "ACTIVE" {
+	ev, ok = parseAgyStreamLine(`{"event":"step_update","step_update":{"step_type":"tool","state":"ACTIVE","tool_name":"run_command","tool_info":{"name":"run_command","parameters":{"CommandLine":"ax -a default resume task swarm-1-api"}}}}`)
+	if !ok || ev.Kind != AgyEventTool || ev.ToolName != "run_command" || ev.ToolState != "ACTIVE" || ev.ToolSummary != "ax -a default resume task swarm-1-api" {
 		t.Fatalf("unexpected tool event: %+v ok=%v", ev, ok)
+	}
+
+	ev, ok = parseAgyStreamLine(`{"event":"step_update","step_update":{"step_type":"tool","state":"DONE","tool_name":"swarm","tool_info":{"name":"swarm","parameters":{"action":"title","title":"Audit chalk"}}}}`)
+	if !ok || ev.Kind != AgyEventSwarmTitle || ev.SwarmTitle != "Audit chalk" {
+		t.Fatalf("unexpected swarm title event: %+v ok=%v", ev, ok)
+	}
+
+	ev, ok = parseAgyStreamLine(`{"event":"step_update","step_update":{"step_type":"tool","state":"DONE","tool_name":"swarm","tool_info":{"name":"swarm","parameters":{"action":"add","name":"api-worker","brief":"Inspect public API"}}}}`)
+	if !ok || ev.Kind != AgyEventSwarmWorker || ev.WorkerName != "api-worker" || ev.WorkerState != "working" || ev.WorkerBrief != "Inspect public API" {
+		t.Fatalf("unexpected swarm add event: %+v ok=%v", ev, ok)
+	}
+
+	ev, ok = parseAgyStreamLine(`{"event":"step_update","step_update":{"step_type":"tool","state":"DONE","tool_name":"swarm","tool_info":{"name":"swarm","parameters":{"action":"status"},"output":"Created At: t\nCompleted At: t\n{\"title\":\"Audit chalk\",\"members\":[{\"name\":\"coordinator\",\"role\":\"coordinator\",\"state\":\"working\"},{\"name\":\"api-worker\",\"role\":\"worker\",\"state\":\"waiting\"}]}"}}}`)
+	if !ok || ev.Kind != AgyEventSwarmRoster || ev.SwarmTitle != "Audit chalk" || len(ev.Members) != 2 {
+		t.Fatalf("unexpected swarm roster event: %+v ok=%v", ev, ok)
+	}
+
+	ev, ok = parseAgyStreamLine(`{"event":"step_update","step_update":{"step_type":"tool","state":"DONE","tool_name":"read_board","tool_info":{"name":"read_board","output":"Created At: t\nCompleted At: t\n{\"messages\":[{\"seq\":2,\"agent\":\"api-worker\",\"text\":\"@coordinator [done] checked API\"}],\"head\":2}"}}}`)
+	if !ok || ev.Kind != AgyEventBoardMessages || len(ev.BoardMessages) != 1 || ev.BoardMessages[0].Seq != 2 || ev.BoardMessages[0].Agent != "api-worker" {
+		t.Fatalf("unexpected read_board event: %+v ok=%v", ev, ok)
+	}
+
+	ev, ok = parseAgyStreamLine(`{"event":"step_update","step_update":{"step_type":"tool","state":"DONE","tool_name":"post_message","tool_info":{"name":"post_message","parameters":{"text":"[done] all good"},"output":"Created At: t\n{\"status\":\"posted\",\"seq\":4}"}}}`)
+	if !ok || ev.Kind != AgyEventBoardMessages || len(ev.BoardMessages) != 1 || ev.BoardMessages[0].Seq != 4 || ev.BoardMessages[0].Agent != "coordinator" {
+		t.Fatalf("unexpected post_message event: %+v ok=%v", ev, ok)
 	}
 
 	ev, ok = parseAgyStreamLine(`{"event":"result","result":{"status":"SUCCESS","response":"final answer\n","duration_seconds":2.5,"num_turns":2}}`)

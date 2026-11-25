@@ -73,27 +73,27 @@ type agyStreamMsg struct {
 	ok bool
 }
 type taskPollTickMsg struct{}
-type taskCountsMsg struct {
-	running int
-	total   int
-	err     error
+type taskListMsg struct {
+	tasks []AXTaskInfo
+	err   error
 }
 type cleanupDoneMsg struct{ res CleanupResult }
 
 type tuiStyles struct {
-	badge     lipgloss.Style
-	swarmName lipgloss.Style
-	metaKey   lipgloss.Style
-	metaVal   lipgloss.Style
-	prompt    lipgloss.Style
-	okIcon    lipgloss.Style
-	infoIcon  lipgloss.Style
-	warnIcon  lipgloss.Style
-	errIcon   lipgloss.Style
-	active    lipgloss.Style
-	dim       lipgloss.Style
-	errBox    lipgloss.Style
-	spinner   lipgloss.Style
+	badge      lipgloss.Style
+	swarmName  lipgloss.Style
+	workerName lipgloss.Style
+	metaKey    lipgloss.Style
+	metaVal    lipgloss.Style
+	prompt     lipgloss.Style
+	okIcon     lipgloss.Style
+	infoIcon   lipgloss.Style
+	warnIcon   lipgloss.Style
+	errIcon    lipgloss.Style
+	active     lipgloss.Style
+	subtle     lipgloss.Style
+	errBox     lipgloss.Style
+	spinner    lipgloss.Style
 }
 
 func newTUIStyles(out io.Writer, colorMode string, colorEnabled bool) tuiStyles {
@@ -109,20 +109,23 @@ func newTUIStyles(out io.Writer, colorMode string, colorEnabled bool) tuiStyles 
 		}
 	}
 
+	// Use standard ANSI colors 1-6 + Faint/Bold so text remains legible on both
+	// dark and light terminal themes (avoiding ANSI 8 / ANSI 15 low-contrast traps).
 	return tuiStyles{
-		badge:     r.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(lipgloss.Color("14")).Padding(0, 1),
-		swarmName: r.NewStyle().Bold(true).Foreground(lipgloss.Color("14")),
-		metaKey:   r.NewStyle().Foreground(lipgloss.Color("8")).Width(10),
-		metaVal:   r.NewStyle().Foreground(lipgloss.Color("7")),
-		prompt:    r.NewStyle().Bold(true).Foreground(lipgloss.Color("15")),
-		okIcon:    r.NewStyle().Bold(true).Foreground(lipgloss.Color("10")),
-		infoIcon:  r.NewStyle().Foreground(lipgloss.Color("8")),
-		warnIcon:  r.NewStyle().Bold(true).Foreground(lipgloss.Color("11")),
-		errIcon:   r.NewStyle().Bold(true).Foreground(lipgloss.Color("9")),
-		active:    r.NewStyle().Bold(true).Foreground(lipgloss.Color("15")),
-		dim:       r.NewStyle().Foreground(lipgloss.Color("8")),
-		errBox:    r.NewStyle().Foreground(lipgloss.Color("9")),
-		spinner:   r.NewStyle().Foreground(lipgloss.Color("14")),
+		badge:      r.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(lipgloss.Color("6")).Padding(0, 1),
+		swarmName:  r.NewStyle().Bold(true).Foreground(lipgloss.Color("6")),
+		workerName: r.NewStyle().Bold(true).Foreground(lipgloss.Color("5")),
+		metaKey:    r.NewStyle().Faint(true).Width(10),
+		metaVal:    r.NewStyle(),
+		prompt:     r.NewStyle().Bold(true),
+		okIcon:     r.NewStyle().Bold(true).Foreground(lipgloss.Color("2")),
+		infoIcon:   r.NewStyle().Faint(true),
+		warnIcon:   r.NewStyle().Bold(true).Foreground(lipgloss.Color("3")),
+		errIcon:    r.NewStyle().Bold(true).Foreground(lipgloss.Color("1")),
+		active:     r.NewStyle().Bold(true),
+		subtle:     r.NewStyle().Faint(true),
+		errBox:     r.NewStyle().Foreground(lipgloss.Color("1")),
+		spinner:    r.NewStyle().Bold(true).Foreground(lipgloss.Color("6")),
 	}
 }
 
@@ -147,16 +150,22 @@ type tuiModel struct {
 	workspaceWaitStart time.Time
 	workspacePhase     string
 
-	startAgy      agyStarter
-	agyCtx        context.Context
-	cancelAgy     context.CancelFunc
-	agyCh         <-chan AgyEvent
-	agyStart      time.Time
-	agyModel      string
-	agyActiveTool string
-	agyRan        bool
-	runningTasks  int
-	totalTasks    int
+	startAgy    agyStarter
+	agyCtx      context.Context
+	cancelAgy   context.CancelFunc
+	agyCh       <-chan AgyEvent
+	agyStart    time.Time
+	agyModel    string
+	agyStatus   string
+	agyRan      bool
+	swarmTitle  string
+	workers     map[string]string
+	workerOrder []string
+	seenSeq     map[int]bool
+
+	tasks          []AXTaskInfo
+	prevTaskStates map[string]string
+	taskFirstSeen  map[string]time.Time
 
 	lineBuf        string
 	streamedOutput string
@@ -200,20 +209,25 @@ func newTUIModel(cfg Config, env *SwarmEnv, styles tuiStyles, starter agyStarter
 	}
 
 	return tuiModel{
-		cfg:           cfg,
-		env:           env,
-		styles:        styles,
-		stage:         stage,
-		spinner:       sp,
-		input:         ti,
-		setupCtx:      setupCtx,
-		cancelSetup:   cancelSetup,
-		setupDeadline: time.Now().Add(cfg.SetupTimeout),
-		inFlightSetup: inFlightSetup,
-		startAgy:      starter,
-		agyCtx:        agyCtx,
-		cancelAgy:     cancelAgy,
-		agyModel:      cfg.Model,
+		cfg:            cfg,
+		env:            env,
+		styles:         styles,
+		stage:          stage,
+		spinner:        sp,
+		input:          ti,
+		setupCtx:       setupCtx,
+		cancelSetup:    cancelSetup,
+		setupDeadline:  time.Now().Add(cfg.SetupTimeout),
+		inFlightSetup:  inFlightSetup,
+		startAgy:       starter,
+		agyCtx:         agyCtx,
+		cancelAgy:      cancelAgy,
+		agyModel:       cfg.Model,
+		agyStatus:      "starting agy /swarm",
+		workers:        make(map[string]string),
+		seenSeq:        make(map[int]bool),
+		prevTaskStates: make(map[string]string),
+		taskFirstSeen:  make(map[string]time.Time),
 	}
 }
 
@@ -292,7 +306,6 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case stageStartingAgy, stageRunningAgy:
 			if msg.Type == tea.KeyCtrlC {
 				if m.cancelled {
-					// Second Ctrl+C forces immediate exit; runTUI still runs cleanup.
 					return m, tea.Quit
 				}
 				m.cancelled = true
@@ -392,8 +405,13 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.agyCh = msg.ch
 		m.agyRan = true
+		m.agyStatus = "initializing swarm"
 		m.stage = stageRunningAgy
-		return m, tea.Batch(waitAgyEventCmd(m.agyCh), m.scheduleTaskPollCmd())
+		return m, tea.Batch(
+			tea.Println(m.renderSetupBanner()),
+			waitAgyEventCmd(m.agyCh),
+			m.pollTasksCmd(),
+		)
 
 	case agyStreamMsg:
 		if m.stage != stageRunningAgy {
@@ -426,40 +444,113 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		var cmds []tea.Cmd
-		switch msg.ev.Kind {
+		ev := msg.ev
+		switch ev.Kind {
 		case AgyEventInit:
-			if msg.ev.Model != "" {
-				m.agyModel = msg.ev.Model
+			if ev.Model != "" {
+				m.agyModel = ev.Model
 			}
-		case AgyEventTool:
-			if msg.ev.ToolState == "ACTIVE" {
-				m.agyActiveTool = msg.ev.ToolName
+			m.agyStatus = "planning swarm"
+
+		case AgyEventActivity:
+			if ev.Text != "" {
+				m.agyStatus = ev.Text
+			}
+
+		case AgyEventSwarmTitle:
+			m.swarmTitle = ev.SwarmTitle
+			m.agyStatus = "swarm: " + ev.SwarmTitle
+			cmds = append(cmds, tea.Println(fmt.Sprintf("%s %s", m.styles.swarmName.Render("◆"), m.styles.active.Render(ev.SwarmTitle))))
+
+		case AgyEventSwarmWorker:
+			m.setWorkerState(ev.WorkerName, ev.WorkerState)
+			if ev.WorkerState == "killed" {
+				m.agyStatus = "stopped worker " + ev.WorkerName
+				cmds = append(cmds, tea.Println(fmt.Sprintf("%s worker %s stopped", m.styles.warnIcon.Render("×"), m.styles.workerName.Render(ev.WorkerName))))
 			} else {
-				m.agyActiveTool = ""
+				m.agyStatus = "waiting on workers"
+				line := fmt.Sprintf("%s worker %s", m.styles.okIcon.Render("+"), m.styles.workerName.Render(ev.WorkerName))
+				if brief := oneLinePreview(ev.WorkerBrief, 90); brief != "" {
+					line += "  " + m.styles.subtle.Render(brief)
+				}
+				cmds = append(cmds, tea.Println(line))
 			}
+
+		case AgyEventSwarmRoster:
+			if ev.SwarmTitle != "" {
+				m.swarmTitle = ev.SwarmTitle
+			}
+			for _, mem := range ev.Members {
+				if mem.Role == "coordinator" {
+					continue
+				}
+				st := mem.State
+				if mem.Killed {
+					st = "killed"
+				}
+				m.setWorkerState(mem.Name, st)
+			}
+			m.agyStatus = "waiting on workers"
+
+		case AgyEventBoardMessages:
+			for _, bm := range ev.BoardMessages {
+				if bm.Seq > 0 {
+					if m.seenSeq[bm.Seq] {
+						continue
+					}
+					m.seenSeq[bm.Seq] = true
+				}
+				prefix := m.styles.workerName.Render("[" + bm.Agent + "]")
+				if bm.Seq > 0 {
+					prefix = fmt.Sprintf("%s %s", m.styles.subtle.Render(fmt.Sprintf("#%d", bm.Seq)), prefix)
+				}
+				preview := oneLinePreview(bm.Text, 120)
+				cmds = append(cmds, tea.Println(fmt.Sprintf("%s %s", prefix, preview)))
+			}
+			m.agyStatus = "coordinating swarm"
+
+		case AgyEventTool:
+			if ev.ToolState == "ACTIVE" {
+				m.agyStatus = ev.ToolSummary
+				if ev.ToolName == "run_command" && ev.ToolSummary != "" {
+					cmds = append(cmds, tea.Println(fmt.Sprintf("%s %s", m.styles.swarmName.Render("▸"), m.styles.subtle.Render(ev.ToolSummary))))
+				}
+			} else {
+				if ev.ErrorText != "" {
+					cmds = append(cmds, tea.Println(fmt.Sprintf("%s %s: %s", m.styles.errIcon.Render("!"), ev.ToolName, oneLinePreview(ev.ErrorText, 120))))
+				}
+				if len(m.workerOrder) > 0 {
+					m.agyStatus = "waiting on workers"
+				} else {
+					m.agyStatus = "thinking"
+				}
+			}
+
 		case AgyEventText:
-			m.agyActiveTool = ""
-			m.streamedOutput += msg.ev.Text
-			m.lineBuf += msg.ev.Text
+			m.agyStatus = "streaming output"
+			m.streamedOutput += ev.Text
+			m.lineBuf += ev.Text
 			if idx := strings.LastIndex(m.lineBuf, "\n"); idx >= 0 {
 				ready := m.lineBuf[:idx]
 				m.lineBuf = m.lineBuf[idx+1:]
 				cmds = append(cmds, tea.Println(ready))
 			}
+
 		case AgyEventResult:
-			if msg.ev.Response != "" {
-				m.finalResponse = msg.ev.Response
+			if ev.Response != "" {
+				m.finalResponse = ev.Response
 			}
-			if msg.ev.Status == "ERROR" || msg.ev.ErrorText != "" {
-				errMsg := msg.ev.ErrorText
+			if ev.Status == "ERROR" || ev.ErrorText != "" {
+				errMsg := ev.ErrorText
 				if errMsg == "" {
-					errMsg = "agy returned status " + msg.ev.Status
+					errMsg = "agy returned status " + ev.Status
 				}
 				m.agyResultErr = errors.New(errMsg)
 			}
+
 		case AgyEventStderr:
 			if len(m.agyStderr) < 20 {
-				m.agyStderr = append(m.agyStderr, msg.ev.ErrorText)
+				m.agyStderr = append(m.agyStderr, ev.ErrorText)
 			}
 		}
 
@@ -470,17 +561,41 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.stage != stageRunningAgy || m.cancelled {
 			return m, nil
 		}
-		return m, m.pollTaskCountsCmd()
+		return m, m.pollTasksCmd()
 
-	case taskCountsMsg:
+	case taskListMsg:
 		if m.stage != stageRunningAgy {
 			return m, nil
 		}
+		var cmds []tea.Cmd
 		if msg.err == nil {
-			m.runningTasks = msg.running
-			m.totalTasks = msg.total
+			now := time.Now()
+			seenNow := make(map[string]string, len(msg.tasks))
+			for _, t := range msg.tasks {
+				seenNow[t.Step] = t.State
+				if _, exists := m.taskFirstSeen[t.Step]; !exists {
+					m.taskFirstSeen[t.Step] = now
+				}
+				prev, existed := m.prevTaskStates[t.Step]
+				if !existed || prev != t.State {
+					cmds = append(cmds, tea.Println(m.formatTaskTransition(t.Step, t.State)))
+				}
+			}
+			for step := range m.prevTaskStates {
+				if _, stillPresent := seenNow[step]; !stillPresent {
+					cmds = append(cmds, tea.Println(fmt.Sprintf("%s ax task %s %s",
+						m.styles.okIcon.Render("✓"),
+						m.styles.swarmName.Render(step),
+						m.styles.subtle.Render("(finished)"),
+					)))
+					delete(m.taskFirstSeen, step)
+				}
+			}
+			m.prevTaskStates = seenNow
+			m.tasks = msg.tasks
 		}
-		return m, m.scheduleTaskPollCmd()
+		cmds = append(cmds, m.scheduleTaskPollCmd())
+		return m, tea.Batch(cmds...)
 
 	case cleanupDoneMsg:
 		m.cleanupRan = true
@@ -503,6 +618,43 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m *tuiModel) setWorkerState(name, state string) {
+	if name == "" {
+		return
+	}
+	if _, exists := m.workers[name]; !exists {
+		m.workerOrder = append(m.workerOrder, name)
+	}
+	if state == "" {
+		state = "working"
+	}
+	m.workers[name] = state
+}
+
+func (m tuiModel) renderSetupBanner() string {
+	return fmt.Sprintf("%s %s %s",
+		m.styles.okIcon.Render("✓"),
+		m.styles.swarmName.Render(m.cfg.Name),
+		m.styles.subtle.Render("Gateway & Workspace ready — running agy /swarm"),
+	)
+}
+
+func (m tuiModel) formatTaskTransition(step, state string) string {
+	switch state {
+	case "Running":
+		return fmt.Sprintf("%s ax task %s %s", m.styles.okIcon.Render("▶"), m.styles.swarmName.Render(step), m.styles.subtle.Render("(Running)"))
+	case "Suspended":
+		return fmt.Sprintf("%s ax task %s %s", m.styles.warnIcon.Render("⏸"), m.styles.swarmName.Render(step), m.styles.subtle.Render("(Suspended)"))
+	case "Failed", "Crashed":
+		return fmt.Sprintf("%s ax task %s %s", m.styles.errIcon.Render("✗"), m.styles.swarmName.Render(step), m.styles.errBox.Render("("+state+")"))
+	default:
+		if state == "" {
+			state = "Starting"
+		}
+		return fmt.Sprintf("%s ax task %s %s", m.styles.infoIcon.Render("…"), m.styles.swarmName.Render(step), m.styles.subtle.Render("("+state+")"))
+	}
 }
 
 func (m tuiModel) startCleanupOrQuit() (tea.Model, tea.Cmd) {
@@ -579,23 +731,20 @@ func waitAgyEventCmd(ch <-chan AgyEvent) tea.Cmd {
 
 func (m tuiModel) scheduleTaskPollCmd() tea.Cmd {
 	interval := m.env.AX.PollInterval
-	if interval <= 0 {
-		interval = 500 * time.Millisecond
-	}
-	if interval < 2*time.Second {
-		interval = 2 * time.Second
+	if interval <= 0 || interval < time.Second {
+		interval = time.Second
 	}
 	return tea.Tick(interval, func(time.Time) tea.Msg {
 		return taskPollTickMsg{}
 	})
 }
 
-func (m tuiModel) pollTaskCountsCmd() tea.Cmd {
+func (m tuiModel) pollTasksCmd() tea.Cmd {
 	ctx := m.agyCtx
 	env := m.env
 	return func() tea.Msg {
-		running, total, err := env.AX.ListTaskCountsWithPrefix(ctx, env.Name+"-")
-		return taskCountsMsg{running: running, total: total, err: err}
+		tasks, err := env.AX.ListTasksInfoWithPrefix(ctx, env.Name+"-")
+		return taskListMsg{tasks: tasks, err: err}
 	}
 }
 
@@ -616,22 +765,54 @@ func (m tuiModel) outputText() string {
 }
 
 func (m tuiModel) View() string {
-	// Once agy is running in the background, keep the view focused cleanly on
-	// agy's streamed output with only a minimal status line underneath.
 	if m.stage == stageRunningAgy {
 		var b strings.Builder
 		if m.lineBuf != "" {
 			b.WriteString(m.lineBuf + "\n")
 		}
-		status := m.runningStatusText()
-		b.WriteString(fmt.Sprintf("%s %s\n", m.spinner.View(), m.styles.dim.Render(status)))
+		if len(m.workerOrder) > 0 {
+			var parts []string
+			for _, name := range m.workerOrder {
+				st := m.workers[name]
+				icon := m.styles.okIcon.Render("●")
+				if st == "waiting" {
+					icon = m.styles.warnIcon.Render("○")
+				} else if st == "killed" {
+					icon = m.styles.infoIcon.Render("×")
+				}
+				parts = append(parts, fmt.Sprintf("%s %s %s", icon, m.styles.workerName.Render(name), m.styles.subtle.Render("("+st+")")))
+			}
+			b.WriteString(m.styles.metaKey.Render("workers") + strings.Join(parts, "  ") + "\n")
+		}
+		if len(m.tasks) > 0 {
+			var parts []string
+			now := time.Now()
+			for _, t := range m.tasks {
+				icon := m.styles.infoIcon.Render("…")
+				switch t.State {
+				case "Running":
+					icon = m.styles.okIcon.Render("▶")
+				case "Suspended":
+					icon = m.styles.warnIcon.Render("⏸")
+				case "Failed", "Crashed":
+					icon = m.styles.errIcon.Render("✗")
+				}
+				detail := t.State
+				if since, ok := m.taskFirstSeen[t.Step]; ok {
+					detail += " · " + formatElapsed(now.Sub(since))
+				}
+				parts = append(parts, fmt.Sprintf("%s %s %s", icon, m.styles.swarmName.Render(t.Step), m.styles.subtle.Render("("+detail+")")))
+			}
+			b.WriteString(m.styles.metaKey.Render("ax tasks") + strings.Join(parts, "  ") + "\n")
+		}
+		b.WriteString(fmt.Sprintf("%s %s\n", m.spinner.View(), m.renderRunningStatusLine()))
 		return b.String()
 	}
 
 	if m.agyRan && (m.stage == stageCleanup || m.stage == stageDone) {
 		var b strings.Builder
 		if m.stage == stageCleanup {
-			b.WriteString(fmt.Sprintf("%s %s\n", m.spinner.View(), m.styles.dim.Render(fmt.Sprintf("cleaning up %s*...", m.cfg.Name))))
+			b.WriteString(fmt.Sprintf("%s %s\n", m.spinner.View(), m.styles.active.Render(fmt.Sprintf("Cleaning up %s*...", m.cfg.Name))))
 			return b.String()
 		}
 		if m.finalStep != nil {
@@ -652,11 +833,11 @@ func (m tuiModel) View() string {
 	header := fmt.Sprintf("  %s  %s  %s  %s",
 		m.styles.badge.Render("ax-swarm"),
 		m.styles.swarmName.Render(m.cfg.Name),
-		m.styles.dim.Render("atespace:"+m.cfg.Atespace),
-		m.styles.dim.Render(fmt.Sprintf("parallel:%d", m.cfg.Parallel)),
+		m.styles.subtle.Render("atespace:"+m.cfg.Atespace),
+		m.styles.subtle.Render(fmt.Sprintf("parallel:%d", m.cfg.Parallel)),
 	)
 	if m.cfg.Model != "" {
-		header += "  " + m.styles.dim.Render("model:"+m.cfg.Model)
+		header += "  " + m.styles.subtle.Render("model:"+m.cfg.Model)
 	}
 	if m.cfg.Keep {
 		header += "  " + m.styles.warnIcon.Render("keep")
@@ -678,7 +859,7 @@ func (m tuiModel) View() string {
 		if m.inputErr != "" {
 			b.WriteString("  " + m.styles.errBox.Render(m.inputErr) + "\n")
 		}
-		b.WriteString("\n  " + m.styles.dim.Render("enter submit · esc / ctrl+c quit") + "\n")
+		b.WriteString("\n  " + m.styles.subtle.Render("enter submit · esc / ctrl+c quit") + "\n")
 		return b.String()
 	}
 
@@ -693,7 +874,7 @@ func (m tuiModel) View() string {
 			label = "Canceling setup..."
 		}
 		b.WriteString(fmt.Sprintf("  %s %s\n", m.spinner.View(), m.styles.active.Render(label)))
-		b.WriteString("\n  " + m.styles.dim.Render("ctrl+c cancel") + "\n")
+		b.WriteString("\n  " + m.styles.subtle.Render("ctrl+c cancel") + "\n")
 
 	case stageCreateWorkspace:
 		label := fmt.Sprintf("Creating Workspace %s...", m.cfg.Name)
@@ -701,7 +882,7 @@ func (m tuiModel) View() string {
 			label = "Canceling setup..."
 		}
 		b.WriteString(fmt.Sprintf("  %s %s\n", m.spinner.View(), m.styles.active.Render(label)))
-		b.WriteString("\n  " + m.styles.dim.Render("ctrl+c cancel") + "\n")
+		b.WriteString("\n  " + m.styles.subtle.Render("ctrl+c cancel") + "\n")
 
 	case stageWaitWorkspace:
 		elapsed := formatElapsed(time.Since(m.workspaceWaitStart))
@@ -714,7 +895,7 @@ func (m tuiModel) View() string {
 			label = "Canceling setup..."
 		}
 		b.WriteString(fmt.Sprintf("  %s %s\n", m.spinner.View(), m.styles.active.Render(label)))
-		b.WriteString("\n  " + m.styles.dim.Render("ctrl+c cancel") + "\n")
+		b.WriteString("\n  " + m.styles.subtle.Render("ctrl+c cancel") + "\n")
 
 	case stageStartingAgy:
 		label := "Starting agy /swarm in background..."
@@ -755,26 +936,19 @@ func (m tuiModel) renderStep(st stepEntry) string {
 	return fmt.Sprintf("%s %s", icon, st.text)
 }
 
-func (m tuiModel) runningStatusText() string {
+func (m tuiModel) renderRunningStatusLine() string {
 	if m.cancelled {
-		return "canceling agy /swarm..."
+		return m.styles.warnIcon.Render("canceling agy /swarm...")
 	}
-	parts := []string{m.cfg.Name}
+	parts := []string{m.styles.swarmName.Render(m.cfg.Name)}
 	if m.agyModel != "" {
-		parts = append(parts, m.agyModel)
+		parts = append(parts, m.styles.active.Render(m.agyModel))
 	}
-	if m.totalTasks > 0 {
-		if m.runningTasks == m.totalTasks {
-			parts = append(parts, fmt.Sprintf("%d AX tasks running", m.runningTasks))
-		} else {
-			parts = append(parts, fmt.Sprintf("%d/%d AX tasks running", m.runningTasks, m.totalTasks))
-		}
+	if m.agyStatus != "" {
+		parts = append(parts, m.agyStatus)
 	}
-	if m.agyActiveTool != "" {
-		parts = append(parts, m.agyActiveTool)
-	}
-	parts = append(parts, formatElapsed(time.Since(m.agyStart)))
-	return strings.Join(parts, " · ") + "  (ctrl+c cancel)"
+	parts = append(parts, m.styles.subtle.Render(formatElapsed(time.Since(m.agyStart))))
+	return strings.Join(parts, m.styles.subtle.Render(" · ")) + m.styles.subtle.Render("  (ctrl+c cancel)")
 }
 
 func (m tuiModel) formatAgyError() string {
@@ -785,6 +959,17 @@ func (m tuiModel) formatAgyError() string {
 		return fmt.Sprintf("%v (%s)", m.agyErr, m.agyStderr[len(m.agyStderr)-1])
 	}
 	return m.agyErr.Error()
+}
+
+func oneLinePreview(s string, maxLen int) string {
+	clean := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", " "), "\n", " "))
+	for strings.Contains(clean, "  ") {
+		clean = strings.ReplaceAll(clean, "  ", " ")
+	}
+	if maxLen > 1 && len(clean) > maxLen {
+		return clean[:maxLen-1] + "…"
+	}
+	return clean
 }
 
 func formatElapsed(d time.Duration) string {

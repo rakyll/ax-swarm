@@ -34,6 +34,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -451,14 +452,78 @@ func runHeadless(cfg Config, env *SwarmEnv, stdin io.Reader, stdout, stderr io.W
 		return 1
 	}
 
+	// Poll AX tasks in the background so headless stderr shows live AX task activity.
+	pollCtx, stopPoll := context.WithCancel(runCtx)
+	var pollWG sync.WaitGroup
+	pollWG.Add(1)
+	go func() {
+		defer pollWG.Done()
+		prev := make(map[string]string)
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-pollCtx.Done():
+				return
+			case <-ticker.C:
+				tasks, pollErr := env.AX.ListTasksInfoWithPrefix(pollCtx, cfg.Name+"-")
+				if pollErr != nil {
+					continue
+				}
+				curr := make(map[string]string, len(tasks))
+				for _, t := range tasks {
+					curr[t.Step] = t.State
+					if old, ok := prev[t.Step]; !ok || old != t.State {
+						ui.Log(fmt.Sprintf("ax task %s (%s)", t.Step, t.State))
+					}
+				}
+				for step := range prev {
+					if _, ok := curr[step]; !ok {
+						ui.Log(fmt.Sprintf("ax task %s (finished)", step))
+					}
+				}
+				prev = curr
+			}
+		}
+	}()
+	defer func() {
+		stopPoll()
+		pollWG.Wait()
+	}()
+
 	var streamed strings.Builder
 	var finalResponse string
 	var agyStderr []string
 	var resultErr error
 	var waitErr error
+	seenSeq := make(map[int]bool)
 
 	for ev := range events {
 		switch ev.Kind {
+		case AgyEventSwarmTitle:
+			ui.Log("swarm: " + ev.SwarmTitle)
+		case AgyEventSwarmWorker:
+			if ev.WorkerState == "killed" {
+				ui.Log("worker stopped: " + ev.WorkerName)
+			} else {
+				ui.Log("worker added: " + ev.WorkerName)
+			}
+		case AgyEventBoardMessages:
+			for _, bm := range ev.BoardMessages {
+				if bm.Seq > 0 {
+					if seenSeq[bm.Seq] {
+						continue
+					}
+					seenSeq[bm.Seq] = true
+				}
+				ui.Log(fmt.Sprintf("#%d [%s] %s", bm.Seq, bm.Agent, oneLinePreview(bm.Text, 120)))
+			}
+		case AgyEventTool:
+			if ev.ToolState == "ACTIVE" && ev.ToolName == "run_command" && ev.ToolSummary != "" {
+				ui.Log("▸ " + ev.ToolSummary)
+			} else if ev.ToolState != "ACTIVE" && ev.ErrorText != "" {
+				ui.Log(fmt.Sprintf("! %s: %s", ev.ToolName, oneLinePreview(ev.ErrorText, 120)))
+			}
 		case AgyEventText:
 			streamed.WriteString(ev.Text)
 			_, _ = io.WriteString(stdout, ev.Text)
@@ -481,6 +546,8 @@ func runHeadless(cfg Config, env *SwarmEnv, stdin io.Reader, stdout, stderr io.W
 			waitErr = ev.Err
 		}
 	}
+	stopPoll()
+	pollWG.Wait()
 
 	if finalResponse != "" && strings.TrimSpace(streamed.String()) == "" {
 		if !strings.HasSuffix(finalResponse, "\n") {

@@ -131,6 +131,23 @@ func (a *AX) ListTasksWithPrefix(ctx context.Context, prefix string) ([]string, 
 	return parseTableNamesWithPrefix(out, prefix), nil
 }
 
+// AXTaskInfo represents one AX Task row from `ax get tasks`.
+type AXTaskInfo struct {
+	Name  string
+	Step  string
+	State string
+	Age   string
+}
+
+// ListTasksInfoWithPrefix returns detailed task rows whose names start with prefix.
+func (a *AX) ListTasksInfoWithPrefix(ctx context.Context, prefix string) ([]AXTaskInfo, error) {
+	out, err := a.run(ctx, nil, "get", "tasks")
+	if err != nil {
+		return nil, err
+	}
+	return parseTableTasksInfoWithPrefix(out, prefix), nil
+}
+
 // ListTaskCountsWithPrefix returns the number of Running tasks and total tasks
 // whose names start with prefix.
 func (a *AX) ListTaskCountsWithPrefix(ctx context.Context, prefix string) (running, total int, err error) {
@@ -192,29 +209,51 @@ func parseTableNamesWithPrefix(out, prefix string) []string {
 	return names
 }
 
-func parseTableTaskCountsWithPrefix(out, prefix string) (running, total int) {
+func parseTableTasksInfoWithPrefix(out, prefix string) []AXTaskInfo {
 	lines := nonEmptyLines(out)
 	if len(lines) < 2 {
-		return 0, 0
+		return nil
 	}
 	header := strings.Fields(lines[0])
 	if len(header) == 0 || header[0] != "NAME" {
-		return 0, 0
+		return nil
 	}
-	stateIdx := -1
+	stateIdx, ageIdx := -1, -1
 	for i, h := range header {
-		if h == "STATE" {
+		switch h {
+		case "STATE":
 			stateIdx = i
-			break
+		case "AGE":
+			ageIdx = i
 		}
 	}
+	var tasks []AXTaskInfo
 	for _, line := range lines[1:] {
 		fields := strings.Fields(line)
-		if len(fields) > 0 && strings.HasPrefix(fields[0], prefix) {
-			total++
-			if stateIdx >= 0 && len(fields) > stateIdx && fields[stateIdx] == "Running" {
-				running++
-			}
+		if len(fields) == 0 || !strings.HasPrefix(fields[0], prefix) {
+			continue
+		}
+		info := AXTaskInfo{
+			Name: fields[0],
+			Step: strings.TrimPrefix(fields[0], prefix),
+		}
+		if stateIdx >= 0 && len(fields) > stateIdx {
+			info.State = fields[stateIdx]
+		}
+		if ageIdx >= 0 && len(fields) > ageIdx {
+			info.Age = fields[ageIdx]
+		}
+		tasks = append(tasks, info)
+	}
+	return tasks
+}
+
+func parseTableTaskCountsWithPrefix(out, prefix string) (running, total int) {
+	tasks := parseTableTasksInfoWithPrefix(out, prefix)
+	for _, t := range tasks {
+		total++
+		if t.State == "Running" {
+			running++
 		}
 	}
 	return running, total

@@ -197,20 +197,28 @@ func TestTUIHappyPathBackgroundAgyStreaming(t *testing.T) {
 		t.Fatalf("unexpected background agy invocation: bin=%q args=%v", launchedBin, launchedArgs)
 	}
 
-	// Feed stream events from background agy: init, task poll, partial text, newline, result, done.
+	// Feed stream events from background agy: init, worker add, live AX task poll, partial text, newline, result, done.
 	updated, _ = m.Update(agyStreamMsg{ev: AgyEvent{Kind: AgyEventInit, Model: "gemini-4-neon-high"}, ok: true})
 	m = updated.(tuiModel)
-	updated, _ = m.Update(taskCountsMsg{running: 1, total: 1})
+	updated, _ = m.Update(agyStreamMsg{ev: AgyEvent{Kind: AgyEventSwarmTitle, SwarmTitle: "Audit chalk"}, ok: true})
+	m = updated.(tuiModel)
+	updated, _ = m.Update(agyStreamMsg{ev: AgyEvent{Kind: AgyEventSwarmWorker, WorkerName: "api-worker", WorkerBrief: "Inspect API", WorkerState: "working"}, ok: true})
+	m = updated.(tuiModel)
+	updated, _ = m.Update(taskListMsg{tasks: []AXTaskInfo{{Name: "swarm-tui01-worker1", Step: "worker1", State: "Running"}}})
+	m = updated.(tuiModel)
+	updated, _ = m.Update(agyStreamMsg{ev: AgyEvent{Kind: AgyEventBoardMessages, BoardMessages: []SwarmBoardMessage{{Seq: 2, Agent: "api-worker", Text: "@coordinator [done] checked API"}}}, ok: true})
 	m = updated.(tuiModel)
 	updated, _ = m.Update(agyStreamMsg{ev: AgyEvent{Kind: AgyEventText, Text: "Line 1\nPartial"}, ok: true})
 	m = updated.(tuiModel)
 
 	runningView := m.View()
 	if strings.Contains(runningView, "Created Gateway") {
-		t.Fatalf("running view should only show agy output and minimal status, got:\n%s", runningView)
+		t.Fatalf("running view should not repeat setup checklist, got:\n%s", runningView)
 	}
-	if !strings.Contains(runningView, "Partial") || !strings.Contains(runningView, "1 AX tasks running") || !strings.Contains(runningView, "gemini-4-neon-high") {
-		t.Fatalf("running view missing streaming partial line or status:\n%s", runningView)
+	for _, want := range []string{"Partial", "api-worker (working)", "worker1 (Running", "gemini-4-neon-high"} {
+		if !strings.Contains(runningView, want) {
+			t.Fatalf("running view missing %q:\n%s", want, runningView)
+		}
 	}
 
 	updated, _ = m.Update(agyStreamMsg{ev: AgyEvent{Kind: AgyEventText, Text: " line 2\n"}, ok: true})
