@@ -143,6 +143,8 @@ func TestValidateConfigRejections(t *testing.T) {
 		{"invalid color", func(c *Config) { c.Color = "rainbow" }, "--color"},
 		{"invalid model flag", func(c *Config) { c.Model = "--inject" }, "--model"},
 		{"control char in ax bin", func(c *Config) { c.AXBin = "ax\nfoo" }, "--ax-bin"},
+		{"malformed allow rule", func(c *Config) { c.AllowRules = []string{"mcp"} }, "--allow"},
+		{"unknown allow action", func(c *Config) { c.AllowRules = []string{"shell(ls)"} }, "--allow"},
 	}
 
 	for _, tc := range cases {

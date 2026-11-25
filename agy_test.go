@@ -16,6 +16,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -198,5 +200,91 @@ func TestStopAgyWaitsForProcessExit(t *testing.T) {
 	}
 	if _, ok := <-ch; ok {
 		t.Fatalf("event channel still open after stopAgy; agy has not exited")
+	}
+}
+
+// TestParseRealAgySwarmStream replays a real `agy --output-format stream-json
+// -p "/swarm ..."` run. Every JSON line must decode as an event (none may fall
+// back to answer text), the failed tool call must surface its error, and the
+// stream must end with a result.
+func TestParseRealAgySwarmStream(t *testing.T) {
+	data, err := os.ReadFile("testdata/agy-swarm-run.ndjson")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawResult, sawToolError bool
+	var text strings.Builder
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		ev, ok := parseAgyStreamLine(line)
+		if !ok {
+			continue
+		}
+		if ev.Kind == AgyEventText {
+			if strings.HasPrefix(ev.Text, "{") {
+				t.Fatalf("JSON line was not decoded and leaked as answer text: %.120s", ev.Text)
+			}
+			text.WriteString(ev.Text)
+		}
+		if ev.Kind == AgyEventTool && ev.ToolState == "ERROR" {
+			sawToolError = true
+			if !strings.Contains(ev.ErrorText, "unknown tool") {
+				t.Fatalf("tool error message not extracted: %q", ev.ErrorText)
+			}
+		}
+		if ev.Kind == AgyEventResult {
+			sawResult = true
+			if ev.Status != "SUCCESS" || !strings.Contains(ev.Response, "probe-ok") {
+				t.Fatalf("unexpected result: %+v", ev)
+			}
+		}
+	}
+	if !sawToolError || !sawResult {
+		t.Fatalf("toolError=%v result=%v", sawToolError, sawResult)
+	}
+	if !strings.Contains(text.String(), "probe-ok") {
+		t.Fatalf("streamed answer text missing: %q", text.String())
+	}
+}
+
+func TestParseAgyNoticeAndErrorShapes(t *testing.T) {
+	ev, ok := parseAgyStreamLine(`jetski: no output produced — a tool required the "mcp" permission that headless mode cannot prompt for, so it was auto-denied.`)
+	if !ok || ev.Kind != AgyEventStderr || !strings.Contains(ev.ErrorText, "auto-denied") {
+		t.Fatalf("notice not recognized: %+v", ev)
+	}
+	ev, ok = parseAgyStreamLine(`{"event":"step_update","step_update":{"step_type":"tool","state":"ERROR","tool_name":"call_mcp_tool"}}`)
+	if !ok || ev.ToolState != "ERROR" || ev.ErrorText == "" {
+		t.Fatalf("ERROR step without message should still carry an error: %+v", ev)
+	}
+	ev, ok = parseAgyStreamLine(`{"event":"result","result":{"status":"ERROR","error":{"type":"MODEL_ERROR","message":"quota exceeded"}}}`)
+	if !ok || ev.Kind != AgyEventResult || ev.ErrorText != "quota exceeded" {
+		t.Fatalf("object error in result not decoded: %+v", ev)
+	}
+}
+
+func TestAgySessionSettingsAllowsAXAndExtraRules(t *testing.T) {
+	cfg := Config{AXBin: "/Users/jbd/ax/bin/ax", AllowRules: []string{"mcp(data-agent-kit/*)", "mcp(data-agent-kit/*)"}}
+	args := BuildAgyArgs(cfg, "/swarm x")
+	i := slices.Index(args, "--settings")
+	if i < 0 || i+1 >= len(args) {
+		t.Fatalf("expected --settings in args: %v", args)
+	}
+	var settings struct {
+		Permissions struct {
+			Allow []string `json:"allow"`
+		} `json:"permissions"`
+	}
+	if err := json.Unmarshal([]byte(args[i+1]), &settings); err != nil {
+		t.Fatalf("settings is not valid JSON: %v (%s)", err, args[i+1])
+	}
+	want := []string{"command(/Users/jbd/ax/bin/ax)", "mcp(data-agent-kit/*)"}
+	if !slices.Equal(settings.Permissions.Allow, want) {
+		t.Fatalf("allow = %v, want %v (deduplicated, ax first)", settings.Permissions.Allow, want)
+	}
+	if args[len(args)-2] != "-p" {
+		t.Fatalf("prompt must stay last: %v", args)
 	}
 }

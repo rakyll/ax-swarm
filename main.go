@@ -44,6 +44,7 @@ var (
 	atespaceRe    = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
 	imageDigestRe = regexp.MustCompile(`@sha256:[0-9a-f]{64}$`)
 	hostnameRe    = regexp.MustCompile(`^(\*\.)?[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$`)
+	agyRuleRe     = regexp.MustCompile(`^(command|mcp|read_file|write_file|read_url|execute_url|download_url)\([^\x00-\x1f]+\)$`)
 )
 
 // Config holds all validated runtime configuration for an ax-swarm invocation.
@@ -70,6 +71,7 @@ type Config struct {
 	DangerouslySkipPermissions bool
 	DryRun                     bool
 	AutoResume                 bool
+	AllowRules                 []string
 }
 
 type stringSliceFlag []string
@@ -213,7 +215,7 @@ func randomSwarmName() (string, error) {
 
 func parseArgs(args []string, axRoot string, stderr io.Writer) (Config, error) {
 	var cfg Config
-	var repos, setupCmds, allowHosts stringSliceFlag
+	var repos, setupCmds, allowHosts, allowRules stringSliceFlag
 	timeout := timeoutFlag(1800 * time.Second)
 
 	fs := flag.NewFlagSet("ax-swarm", flag.ContinueOnError)
@@ -259,6 +261,7 @@ Environment:
 	fs.BoolVar(&cfg.DangerouslySkipPermissions, "dangerously-skip-permissions", false, "pass --dangerously-skip-permissions to agy")
 	fs.BoolVar(&cfg.DryRun, "dry-run", false, "print the agy command and /swarm prompt without creating AX resources or launching agy")
 	fs.BoolVar(&cfg.AutoResume, "auto-resume", true, "automatically resume newly created swarm tasks that are waiting in Suspended")
+	fs.Var(&allowRules, "allow", "extra agy permission rule allowed for this run only, e.g. 'mcp(server/*)' or 'read_url(github.com)' (repeatable)")
 
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
@@ -267,6 +270,7 @@ Environment:
 	cfg.Repos = []string(repos)
 	cfg.SetupCmds = []string(setupCmds)
 	cfg.AllowHosts = []string(allowHosts)
+	cfg.AllowRules = []string(allowRules)
 	cfg.SetupTimeout = time.Duration(timeout)
 	if fs.NArg() > 0 {
 		cfg.Goal = strings.TrimSpace(strings.Join(fs.Args(), " "))
@@ -326,6 +330,11 @@ func validateConfig(cfg *Config, axRoot string) error {
 	for _, host := range cfg.AllowHosts {
 		if !hostnameRe.MatchString(host) {
 			return fmt.Errorf("--allow-host %q is not a valid hostname pattern", host)
+		}
+	}
+	for _, rule := range cfg.AllowRules {
+		if !agyRuleRe.MatchString(rule) {
+			return fmt.Errorf("--allow %q is not an agy permission rule; use action(target) with action one of command, mcp, read_file, write_file, read_url, execute_url, download_url (e.g. 'mcp(server/*)')", rule)
 		}
 	}
 	if cfg.Parallel < 1 {
@@ -485,7 +494,9 @@ func runHeadless(cfg Config, env *SwarmEnv, stdin io.Reader, stdout, stderr io.W
 	swarmPrompt := BuildSwarmPrompt(cfg, env.AX.BaseCommandLine())
 	agyArgs := BuildAgyArgs(cfg, swarmPrompt)
 
-	events, err := StartAgyStream(runCtx, cfg.AgyBin, agyArgs)
+	agyCtx, cancelAgy := context.WithCancel(runCtx)
+	defer cancelAgy()
+	events, err := StartAgyStream(agyCtx, cfg.AgyBin, agyArgs)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s\n", ui.Paint("ax-swarm: "+err.Error(), ansiRed))
 		return 1
@@ -554,6 +565,8 @@ func runHeadless(cfg Config, env *SwarmEnv, stdin io.Reader, stdout, stderr io.W
 	var resultErr error
 	var waitErr error
 	seenSeq := make(map[int]bool)
+	seenNotice := make(map[string]bool)
+	gotResult := false
 
 	for ev := range events {
 		switch ev.Kind {
@@ -617,6 +630,7 @@ func runHeadless(cfg Config, env *SwarmEnv, stdin io.Reader, stdout, stderr io.W
 			streamed.WriteString(ev.Text)
 			_, _ = io.WriteString(stdout, ev.Text)
 		case AgyEventResult:
+			gotResult = true
 			if ev.Response != "" {
 				finalResponse = ev.Response
 			}
@@ -631,10 +645,20 @@ func runHeadless(cfg Config, env *SwarmEnv, stdin io.Reader, stdout, stderr io.W
 			if len(agyStderr) < 20 {
 				agyStderr = append(agyStderr, ev.ErrorText)
 			}
+			if !seenNotice[ev.ErrorText] {
+				seenNotice[ev.ErrorText] = true
+				ui.Log("! agy: " + ev.ErrorText)
+			}
 		case AgyEventDone:
 			waitErr = ev.Err
 		}
+		if gotResult {
+			// `result` is agy's completion signal; don't wait for the process to
+			// exit on its own.
+			break
+		}
 	}
+	stopAgy(cancelAgy, events, 10*time.Second)
 	stopPoll()
 	pollWG.Wait()
 
@@ -646,11 +670,14 @@ func runHeadless(cfg Config, env *SwarmEnv, stdin io.Reader, stdout, stderr io.W
 	} else if streamed.Len() > 0 && !strings.HasSuffix(streamed.String(), "\n") {
 		_, _ = io.WriteString(stdout, "\n")
 	}
+	if gotResult && strings.TrimSpace(streamed.String()) == "" && strings.TrimSpace(finalResponse) == "" {
+		ui.Log("! agy finished without a final answer")
+	}
 
 	if runCtx.Err() != nil {
 		return 1
 	}
-	if waitErr != nil {
+	if waitErr != nil && !gotResult {
 		var exitErr *exec.ExitError
 		if errors.As(waitErr, &exitErr) {
 			if len(agyStderr) > 0 {

@@ -421,7 +421,7 @@ func TestPrintlnWrapsToTerminalWidth(t *testing.T) {
 	}
 }
 
-func TestIdleWarningExplainsSwarmWait(t *testing.T) {
+func TestIdleWarningExplainsWaitingCoordinator(t *testing.T) {
 	var out bytes.Buffer
 	m := newTUIModel(testTUIConfig("x"), &SwarmEnv{AX: &AX{}, Name: "swarm-tui01"}, newTUIStyles(&out, "never", false), noopAgyStarter)
 	defer m.cancelSetup()
@@ -431,11 +431,6 @@ func TestIdleWarningExplainsSwarmWait(t *testing.T) {
 
 	updated, _ := m.Update(agyStreamMsg{ev: AgyEvent{Kind: AgyEventSwarmWorker, WorkerName: "stats", WorkerState: "working"}, ok: true})
 	m = updated.(tuiModel)
-	updated, _ = m.Update(agyStreamMsg{ev: AgyEvent{Kind: AgyEventTool, ToolName: "swarm_wait", ToolState: "ACTIVE"}, ok: true})
-	m = updated.(tuiModel)
-	if m.waitingSince.IsZero() || !strings.Contains(m.renderRunningStatusLine(), "waiting for a worker to report") {
-		t.Fatalf("expected waiting status, got %q", m.renderRunningStatusLine())
-	}
 
 	// Simulate 2 minutes of silence, then a task poll triggers the idle warning once.
 	m.lastActivity = time.Now().Add(-2 * time.Minute)
@@ -445,16 +440,57 @@ func TestIdleWarningExplainsSwarmWait(t *testing.T) {
 		t.Fatalf("expected idle warning after 2m of silence")
 	}
 	msg := m.idleMessage(2*time.Minute, time.Now())
-	for _, want := range []string{"no swarm activity for 2m0s", "waiting for a worker to post @coordinator", "as of when each worker was added", "ctrl+c"} {
+	for _, want := range []string{"no swarm activity for 2m0s", "post @coordinator", "as of when each worker was added", "ctrl+c"} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("idle message missing %q: %s", want, msg)
 		}
 	}
 
-	// Any new agy event clears the waiting state.
+	// Any new agy event resets the idle warning.
 	updated, _ = m.Update(agyStreamMsg{ev: AgyEvent{Kind: AgyEventActivity, Text: "swarm update received"}, ok: true})
 	m = updated.(tuiModel)
-	if !m.waitingSince.IsZero() || m.idleWarned {
-		t.Fatalf("expected activity to clear waiting/idle state")
+	if m.idleWarned {
+		t.Fatalf("expected activity to reset the idle warning")
+	}
+}
+
+func TestResultEventCompletesRunWithoutProcessExit(t *testing.T) {
+	runner := &fakeRunner{handler: func(c fakeCall) (string, string, error) {
+		return "NAME ATESPACE STATE\n", "", nil
+	}}
+	env := &SwarmEnv{AX: &AX{Bin: "ax", Atespace: "default", Runner: runner}, Name: "swarm-tui01", GatewayCreated: true, WorkspaceCreated: true}
+	var out bytes.Buffer
+	m := newTUIModel(testTUIConfig("x"), env, newTUIStyles(&out, "never", false), noopAgyStarter)
+	defer m.cancelSetup()
+	defer m.cancelAgy()
+	m.stage = stageRunningAgy
+	m.agyRan = true
+	m.agyStart = time.Now()
+
+	updated, _ := m.Update(agyStreamMsg{ev: AgyEvent{Kind: AgyEventStderr, ErrorText: "jetski: tool auto-denied"}, ok: true})
+	m = updated.(tuiModel)
+	// No AgyEventDone follows: the result alone must end the run.
+	updated, _ = m.Update(agyStreamMsg{ev: AgyEvent{Kind: AgyEventResult, Status: "SUCCESS", Response: ""}, ok: true})
+	m = updated.(tuiModel)
+	if m.stage != stageCleanup {
+		t.Fatalf("expected cleanup right after result, got stage %v", m.stage)
+	}
+	if !m.gotResult || !strings.Contains(m.completionLine(), "agy /swarm finished") {
+		t.Fatalf("completion not recorded: gotResult=%v line=%q", m.gotResult, m.completionLine())
+	}
+	if m.agyErr != nil {
+		t.Fatalf("successful result should not set an error: %v", m.agyErr)
+	}
+
+	// A failed result is reported as an error.
+	m2 := newTUIModel(testTUIConfig("x"), env, newTUIStyles(&out, "never", false), noopAgyStarter)
+	defer m2.cancelSetup()
+	defer m2.cancelAgy()
+	m2.stage = stageRunningAgy
+	m2.agyRan = true
+	updated, _ = m2.Update(agyStreamMsg{ev: AgyEvent{Kind: AgyEventResult, Status: "ERROR", ErrorText: "quota exceeded"}, ok: true})
+	m2 = updated.(tuiModel)
+	if m2.agyErr == nil || !strings.Contains(m2.completionLine(), "error") {
+		t.Fatalf("expected error completion, got err=%v line=%q", m2.agyErr, m2.completionLine())
 	}
 }

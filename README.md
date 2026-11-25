@@ -143,10 +143,22 @@ ax-swarm \
 | `--mode` | | Agent mode passed to `agy --mode` (`accept-edits\|auto\|plan`) |
 | `--project` | | Project ID or name passed to `agy --project` |
 | `--dangerously-skip-permissions` | `false` | Forward `--dangerously-skip-permissions` to `agy` |
+| `--allow` | | Extra `agy` permission rule for this run only, e.g. `mcp(server/*)` (repeatable). The swarm's `ax` binary is always allowed. Never written to your `settings.json` |
+| `--auto-resume` | `true` | Resume newly created swarm tasks that are waiting in `Suspended` |
 | `--ax-bin` | `$AX_BIN` / `$AX_ROOT/bin/ax` / `ax` | Path to `ax` CLI binary |
 | `--agy-bin` | `$AGY_BIN` / `agy` | Path to `agy` CLI binary |
 | `--color` | `auto` | Color output: `auto`, `always`, `never` (respects `NO_COLOR`) |
 | `--dry-run` | `false` | Print the `agy` command and `/swarm` prompt without creating AX resources or launching `agy` |
+
+### Permissions
+
+`agy` runs in the background, so it can't stop to ask you for approval: any tool call that would normally ask (for example an MCP tool) is denied. `ax-swarm` passes per-run permissions to `agy` with `--settings` (never saved to your `settings.json`). The swarm's `ax` binary is always allowed; allow anything else with `--allow`:
+
+```bash
+ax-swarm --allow 'mcp(github/*)' --allow 'read_url(docs.python.org)' "..."
+```
+
+Rules use `agy`'s syntax: `command(prefix)`, `mcp(server/tool)`, `mcp(server/*)`, `read_url(domain)`, and so on.
 
 ### Environment Variables
 

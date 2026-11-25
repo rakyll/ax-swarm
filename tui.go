@@ -181,7 +181,6 @@ type tuiModel struct {
 	lastPollErr    string
 
 	lastActivity time.Time // last agy event or AX task state change
-	waitingSince time.Time // coordinator is blocked in swarm_wait since then
 	rosterAt     time.Time // when worker states were last reported by `swarm status`
 	idleWarned   bool
 
@@ -190,6 +189,11 @@ type tuiModel struct {
 	finalResponse  string
 	agyStderr      []string
 	agyResultErr   error
+
+	gotResult      bool // agy sent its `result` completion event
+	resultStatus   string
+	resultDuration float64
+	shownNotices   map[string]bool
 
 	err        error
 	agyErr     error
@@ -250,6 +254,7 @@ func newTUIModel(cfg Config, env *SwarmEnv, styles tuiStyles, starter agyStarter
 		taskStateSince: make(map[string]time.Time),
 		resumer:        newAutoResumer(3 * time.Second),
 		resumeErrShown: make(map[string]bool),
+		shownNotices:   make(map[string]bool),
 	}
 }
 
@@ -441,8 +446,14 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.stage != stageRunningAgy {
 			return m, nil
 		}
-		if !msg.ok || msg.ev.Kind == AgyEventDone {
+		if !msg.ok || msg.ev.Kind == AgyEventDone || msg.ev.Kind == AgyEventResult {
+			// agy's `result` event is its completion signal. Finish on it rather
+			// than waiting for the process to exit, which it may not do promptly;
+			// runTUI stops the process before cleaning up.
 			var flushCmds []tea.Cmd
+			if msg.ok && msg.ev.Kind == AgyEventResult {
+				m.recordResult(msg.ev)
+			}
 			if m.lineBuf != "" {
 				flushCmds = append(flushCmds, m.println(m.lineBuf))
 				m.lineBuf = ""
@@ -454,26 +465,27 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					flushCmds = append(flushCmds, m.println(trimmed))
 				}
 			}
-			if msg.ok && msg.ev.Err != nil {
+			if msg.ok && msg.ev.Kind == AgyEventDone && msg.ev.Err != nil && !m.gotResult {
 				m.agyErr = msg.ev.Err
 			} else if m.agyResultErr != nil {
 				m.agyErr = m.agyResultErr
 			}
-			nextModel, nextCmd := m.startCleanupOrQuit()
-			if len(flushCmds) > 0 {
-				cmds := append(flushCmds, nextCmd)
-				return nextModel, tea.Sequence(cmds...)
+			flushCmds = append(flushCmds, m.println(m.completionLine()))
+			if m.gotResult && strings.TrimSpace(m.outputText()) == "" {
+				warn := "agy finished without a final answer."
+				if len(m.agyStderr) > 0 {
+					warn += " Last agy message: " + m.agyStderr[len(m.agyStderr)-1]
+				}
+				flushCmds = append(flushCmds, m.println(m.styles.warnIcon.Render("!")+" "+warn))
 			}
-			return nextModel, nextCmd
+			nextModel, nextCmd := m.startCleanupOrQuit()
+			return nextModel, tea.Sequence(append(flushCmds, nextCmd)...)
 		}
 
 		var cmds []tea.Cmd
 		ev := msg.ev
 		m.lastActivity = time.Now()
 		m.idleWarned = false
-		if !(ev.Kind == AgyEventTool && ev.ToolName == "swarm_wait" && ev.ToolState == "ACTIVE") {
-			m.waitingSince = time.Time{}
-		}
 		switch ev.Kind {
 		case AgyEventInit:
 			if ev.Model != "" {
@@ -564,14 +576,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.agyStatus = "coordinating swarm"
 
 		case AgyEventTool:
-			if ev.ToolName == "swarm_wait" && ev.ToolState == "ACTIVE" {
-				m.waitingSince = time.Now()
-				m.agyStatus = "waiting for a worker to report"
-				cmds = append(cmds, m.println(fmt.Sprintf("%s coordinator is waiting for a worker to post %s",
-					m.styles.infoIcon.Render("◌"),
-					m.styles.subtle.Render("@coordinator"),
-				)))
-			} else if ev.ToolState == "ACTIVE" {
+			if ev.ToolState == "ACTIVE" {
 				m.agyStatus = ev.ToolSummary
 				if ev.ToolName == "run_command" && ev.ToolSummary != "" {
 					cmds = append(cmds, m.println(fmt.Sprintf("%s %s", m.styles.swarmName.Render("▸"), ev.ToolSummary)))
@@ -613,21 +618,15 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, m.println(ready))
 			}
 
-		case AgyEventResult:
-			if ev.Response != "" {
-				m.finalResponse = ev.Response
-			}
-			if ev.Status == "ERROR" || ev.ErrorText != "" {
-				errMsg := ev.ErrorText
-				if errMsg == "" {
-					errMsg = "agy returned status " + ev.Status
-				}
-				m.agyResultErr = errors.New(errMsg)
-			}
-
 		case AgyEventStderr:
 			if len(m.agyStderr) < 20 {
 				m.agyStderr = append(m.agyStderr, ev.ErrorText)
+			}
+			// Show agy's own messages (e.g. a headless permission denial) as
+			// they happen; they often explain why a run stops or has no answer.
+			if !m.shownNotices[ev.ErrorText] {
+				m.shownNotices[ev.ErrorText] = true
+				cmds = append(cmds, m.println(m.styles.warnIcon.Render("!")+" "+m.styles.subtle.Render("agy: "+ev.ErrorText)))
 			}
 		}
 
@@ -1211,9 +1210,7 @@ func (m tuiModel) renderRunningStatusLine() string {
 	if m.agyModel != "" {
 		parts = append(parts, m.styles.active.Render(m.agyModel))
 	}
-	if !m.waitingSince.IsZero() {
-		parts = append(parts, m.styles.warnIcon.Render(fmt.Sprintf("waiting for a worker to report (%s)", formatElapsed(time.Since(m.waitingSince)))))
-	} else if m.agyStatus != "" {
+	if m.agyStatus != "" {
 		parts = append(parts, m.agyStatus)
 	}
 	parts = append(parts, m.styles.subtle.Render(formatElapsed(time.Since(m.agyStart))))
@@ -1230,16 +1227,51 @@ func (m tuiModel) formatAgyError() string {
 	return m.agyErr.Error()
 }
 
+// recordResult stores agy's `result` completion event.
+func (m *tuiModel) recordResult(ev AgyEvent) {
+	m.gotResult = true
+	m.resultStatus = ev.Status
+	m.resultDuration = ev.DurationSeconds
+	if ev.Response != "" {
+		m.finalResponse = ev.Response
+	}
+	if ev.Status == "ERROR" || ev.ErrorText != "" {
+		errMsg := ev.ErrorText
+		if errMsg == "" {
+			errMsg = "agy returned status " + ev.Status
+		}
+		m.agyResultErr = errors.New(errMsg)
+	}
+}
+
+// completionLine summarizes how the agy run ended.
+func (m tuiModel) completionLine() string {
+	elapsed := formatElapsed(time.Since(m.agyStart))
+	switch {
+	case m.cancelled:
+		return m.styles.warnIcon.Render("×") + " agy /swarm canceled after " + elapsed
+	case m.gotResult && m.agyResultErr == nil:
+		return m.styles.okIcon.Render("✓") + " agy /swarm finished in " + elapsed +
+			m.styles.subtle.Render(" ("+strings.ToLower(m.resultStatus)+")")
+	case m.gotResult:
+		return m.styles.errIcon.Render("✗") + " agy /swarm finished with an error after " + elapsed
+	case m.agyErr != nil:
+		return m.styles.errIcon.Render("✗") + " agy exited without a result after " + elapsed
+	default:
+		return m.styles.warnIcon.Render("!") + " agy exited without sending a result after " + elapsed
+	}
+}
+
 // idleWarnAfter is how long the swarm may show no activity before ax-swarm
 // explains what it is waiting on.
 const idleWarnAfter = 90 * time.Second
 
 func (m tuiModel) idleMessage(idle time.Duration, now time.Time) string {
 	msg := fmt.Sprintf("no swarm activity for %s.", formatElapsed(idle))
-	if !m.waitingSince.IsZero() {
-		msg += " The coordinator is waiting for a worker to post @coordinator; if workers finished without reporting, it will keep waiting."
+	if len(m.workerOrder) > 0 {
+		msg += " Between turns the coordinator waits for a worker to post @coordinator on the board; if workers finished without reporting, it will keep waiting."
 	} else {
-		msg += " Workers may still be busy in their own sessions."
+		msg += " agy may still be thinking."
 	}
 	if note := m.rosterNote(now); note != "" {
 		msg += " " + capitalizeFirst(note) + "."

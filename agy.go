@@ -33,6 +33,9 @@ import (
 // in non-interactive print mode with NDJSON streaming output.
 func BuildAgyArgs(cfg Config, prompt string) []string {
 	args := []string{"--output-format", "stream-json"}
+	if settings := agySessionSettings(cfg); settings != "" {
+		args = append(args, "--settings", settings)
+	}
 	if cfg.Model != "" {
 		args = append(args, "--model", cfg.Model)
 	}
@@ -50,6 +53,44 @@ func BuildAgyArgs(cfg Config, prompt string) []string {
 	}
 	args = append(args, "-p", prompt)
 	return args
+}
+
+// agyPermissionRules returns the allow rules for this swarm session: the ax
+// binary the swarm drives (so its commands never wait on an approval that
+// headless mode would deny), followed by any --allow rules.
+func agyPermissionRules(cfg Config) []string {
+	var rules []string
+	seen := make(map[string]bool)
+	add := func(r string) {
+		if r != "" && !seen[r] {
+			seen[r] = true
+			rules = append(rules, r)
+		}
+	}
+	if cfg.AXBin != "" {
+		add("command(" + cfg.AXBin + ")")
+	}
+	for _, r := range cfg.AllowRules {
+		add(r)
+	}
+	return rules
+}
+
+// agySessionSettings returns the JSON passed to `agy --settings`. agy applies
+// it to this session only and never saves it, so the user's global
+// settings.json is left untouched.
+func agySessionSettings(cfg Config) string {
+	rules := agyPermissionRules(cfg)
+	if len(rules) == 0 {
+		return ""
+	}
+	data, err := json.Marshal(map[string]any{
+		"permissions": map[string]any{"allow": rules},
+	})
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 // AgyEventKind classifies normalized events streamed from a background `agy` run.
@@ -113,13 +154,42 @@ type AgyEvent struct {
 	Err             error
 }
 
+// agyError holds an error field from agy's stream-json output. agy sends it
+// either as a string or as an object such as {"type":"TOOL_ERROR","message":"..."}.
+type agyError string
+
+func (e *agyError) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		*e = agyError(s)
+		return nil
+	}
+	var obj struct {
+		Type    string `json:"type"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(data, &obj); err == nil && (obj.Message != "" || obj.Type != "") {
+		if obj.Message == "" {
+			*e = agyError(obj.Type)
+		} else {
+			*e = agyError(obj.Message)
+		}
+		return nil
+	}
+	// Unknown shape: keep the raw JSON rather than failing the whole line.
+	if string(data) != "null" {
+		*e = agyError(strings.TrimSpace(string(data)))
+	}
+	return nil
+}
+
 type rawAgyEnvelope struct {
 	Event          string        `json:"event"`
 	ConversationID string        `json:"conversation_id"`
 	Init           *rawAgyInit   `json:"init"`
 	StepUpdate     *rawAgyStep   `json:"step_update"`
 	Result         *rawAgyResult `json:"result"`
-	Error          string        `json:"error"`
+	Error          agyError      `json:"error"`
 }
 
 type rawAgyInit struct {
@@ -137,28 +207,43 @@ type rawAgyStep struct {
 	ToolName        string      `json:"tool_name"`
 	ToolInfo        *rawAgyTool `json:"tool_info"`
 	DurationSeconds float64     `json:"duration_seconds"`
-	Error           string      `json:"error"`
+	Error           agyError    `json:"error"`
 }
 
 type rawAgyTool struct {
 	Name       string         `json:"name"`
 	Parameters map[string]any `json:"parameters"`
 	Output     string         `json:"output"`
-	Error      string         `json:"error"`
+	Error      agyError       `json:"error"`
 }
 
 type rawAgyResult struct {
-	ConversationID  string  `json:"conversation_id"`
-	Status          string  `json:"status"`
-	Response        string  `json:"response"`
-	Error           string  `json:"error"`
-	DurationSeconds float64 `json:"duration_seconds"`
-	NumTurns        int     `json:"num_turns"`
+	ConversationID  string   `json:"conversation_id"`
+	Status          string   `json:"status"`
+	Response        string   `json:"response"`
+	Error           agyError `json:"error"`
+	DurationSeconds float64  `json:"duration_seconds"`
+	NumTurns        int      `json:"num_turns"`
+}
+
+// agyNoticePrefixes mark plain-text lines agy prints about the run itself
+// (for example a headless permission denial), as opposed to answer text.
+var agyNoticePrefixes = []string{"jetski:", "agy:", "warning:", "error:"}
+
+func isAgyNotice(line string) bool {
+	lower := strings.ToLower(line)
+	for _, p := range agyNoticePrefixes {
+		if strings.HasPrefix(lower, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // parseAgyStreamLine decodes one line from `agy --output-format stream-json`.
 // Non-JSON stdout lines fall back to plain AgyEventText so plain-text stubs and
-// non-structured output still render cleanly.
+// non-structured output still render cleanly; agy's own notices become
+// AgyEventStderr so they are shown as warnings rather than as answer text.
 func parseAgyStreamLine(line string) (AgyEvent, bool) {
 	trimmed := strings.TrimSpace(line)
 	if trimmed == "" {
@@ -166,6 +251,9 @@ func parseAgyStreamLine(line string) (AgyEvent, bool) {
 	}
 
 	if !strings.HasPrefix(trimmed, "{") {
+		if isAgyNotice(trimmed) {
+			return AgyEvent{Kind: AgyEventStderr, ErrorText: trimmed}, true
+		}
 		return AgyEvent{Kind: AgyEventText, Text: trimmed + "\n"}, true
 	}
 
@@ -201,14 +289,14 @@ func parseAgyStreamLine(line string) (AgyEvent, bool) {
 			ConversationID:  r.ConversationID,
 			Status:          r.Status,
 			Response:        r.Response,
-			ErrorText:       r.Error,
+			ErrorText:       string(r.Error),
 			DurationSeconds: r.DurationSeconds,
 			NumTurns:        r.NumTurns,
 		}, true
 
 	default:
 		if env.Error != "" {
-			return AgyEvent{Kind: AgyEventStderr, ErrorText: env.Error}, true
+			return AgyEvent{Kind: AgyEventStderr, ErrorText: string(env.Error)}, true
 		}
 		return AgyEvent{}, false
 	}
@@ -258,10 +346,13 @@ func parseToolStepUpdate(st *rawAgyStep) (AgyEvent, bool) {
 		}
 		params = st.ToolInfo.Parameters
 		output = st.ToolInfo.Output
-		toolErr = st.ToolInfo.Error
+		toolErr = string(st.ToolInfo.Error)
 	}
 	if toolErr == "" {
-		toolErr = st.Error
+		toolErr = string(st.Error)
+	}
+	if toolErr == "" && st.State == "ERROR" {
+		toolErr = "tool call failed"
 	}
 
 	switch name {
