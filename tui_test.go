@@ -24,6 +24,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func testTUIConfig(goal string) Config {
@@ -215,7 +216,7 @@ func TestTUIHappyPathBackgroundAgyStreaming(t *testing.T) {
 	if strings.Contains(runningView, "Created Gateway") {
 		t.Fatalf("running view should not repeat setup checklist, got:\n%s", runningView)
 	}
-	for _, want := range []string{"Partial", "api-worker (working)", "worker1 (Running", "#1 · 1 task (1 running)", "gemini-4-neon-high"} {
+	for _, want := range []string{"Partial", "TYPE", "NAME", "STATE", "FOR", "worker", "api-worker", "working", "ax task", "swarm-tui01-worker1", "Running", "#1 · 1 task (1 running)", "gemini-4-neon-high"} {
 		if !strings.Contains(runningView, want) {
 			t.Fatalf("running view missing %q:\n%s", want, runningView)
 		}
@@ -373,5 +374,28 @@ func TestTUIKeepSkipsCleanup(t *testing.T) {
 	}
 	if len(runner.calls) != 0 {
 		t.Fatalf("expected zero AX delete calls when keep=true, got %v", runner.calls)
+	}
+}
+
+func TestRenderErrorWrapsLongAXErrors(t *testing.T) {
+	var out bytes.Buffer
+	m := newTUIModel(testTUIConfig("x"), &SwarmEnv{AX: &AX{}, Name: "swarm-tui01"}, newTUIStyles(&out, "never", false), noopAgyStarter)
+	defer m.cancelSetup()
+	defer m.cancelAgy()
+	m.width = 60
+
+	msg := "ax apply -f -: Error: applying document 1: rpc error: code = FailedPrecondition desc = preparing workspace default/swarm-tui01: internal server error: workflow failed at step CallAteletRestore: while running `runsc start`: exit status 128"
+	rendered := m.renderError(msg, 2)
+
+	for _, line := range strings.Split(rendered, "\n") {
+		if w := lipgloss.Width(line); w > 60 {
+			t.Fatalf("line wider than terminal (%d > 60): %q", w, line)
+		}
+	}
+	flat := strings.Join(strings.Fields(rendered), " ")
+	for _, want := range []string{"exit status 128", "AX cluster problem", "ax local status"} {
+		if !strings.Contains(flat, want) {
+			t.Fatalf("rendered error missing %q:\n%s", want, rendered)
+		}
 	}
 }

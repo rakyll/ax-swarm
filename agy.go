@@ -631,6 +631,31 @@ func StartAgyStream(ctx context.Context, agyBin string, args []string) (<-chan A
 	return events, nil
 }
 
+// stopAgy cancels a background agy run and waits until it has exited, which is
+// signalled by its event channel closing. Canceling alone is not enough: the
+// process-group kill runs asynchronously, so returning (and os.Exit) right after
+// cancel can leave agy running. The wait is bounded by timeout.
+func stopAgy(cancel context.CancelFunc, events <-chan AgyEvent, timeout time.Duration) {
+	if cancel != nil {
+		cancel()
+	}
+	if events == nil {
+		return
+	}
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	for {
+		select {
+		case _, ok := <-events:
+			if !ok {
+				return
+			}
+		case <-deadline.C:
+			return
+		}
+	}
+}
+
 // readLines reads arbitrarily long lines without bufio.Scanner's token size cap.
 func readLines(r io.Reader, fn func(string)) {
 	br := bufio.NewReaderSize(r, 64*1024)

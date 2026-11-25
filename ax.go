@@ -159,6 +159,58 @@ func (a *AX) ListTaskCountsWithPrefix(ctx context.Context, prefix string) (runni
 	return running, total, nil
 }
 
+// autoResumer decides which swarm tasks ax-swarm should start on the swarm's
+// behalf. New AX tasks begin Suspended, and a worker would otherwise need extra
+// model turns to resume them. Only tasks that have never been Running are
+// resumed, so a task a worker suspends on purpose is left alone.
+type autoResumer struct {
+	everRunning map[string]bool
+	lastTry     map[string]time.Time
+	retry       time.Duration
+}
+
+func newAutoResumer(retry time.Duration) *autoResumer {
+	return &autoResumer{
+		everRunning: make(map[string]bool),
+		lastTry:     make(map[string]time.Time),
+		retry:       retry,
+	}
+}
+
+// due records the latest task states and returns the tasks to resume now.
+func (r *autoResumer) due(tasks []AXTaskInfo, now time.Time) []AXTaskInfo {
+	present := make(map[string]bool, len(tasks))
+	var out []AXTaskInfo
+	for _, t := range tasks {
+		present[t.Name] = true
+		if t.State == "Running" {
+			r.everRunning[t.Name] = true
+			continue
+		}
+		if t.State != "Suspended" || r.everRunning[t.Name] {
+			continue
+		}
+		if last, ok := r.lastTry[t.Name]; ok && now.Sub(last) < r.retry {
+			continue
+		}
+		r.lastTry[t.Name] = now
+		out = append(out, t)
+	}
+	for name := range r.lastTry {
+		if !present[name] {
+			delete(r.lastTry, name)
+			delete(r.everRunning, name)
+		}
+	}
+	return out
+}
+
+// Resume resumes (starts) a task.
+func (a *AX) Resume(ctx context.Context, name string) error {
+	_, err := a.run(ctx, nil, "resume", "task", name)
+	return err
+}
+
 // Delete deletes a resource by kind and name.
 func (a *AX) Delete(ctx context.Context, kind, name string) error {
 	_, err := a.run(ctx, nil, "delete", kind, name)
@@ -338,29 +390,27 @@ type SwarmEnv struct {
 }
 
 // CreateGateway creates the single shared Gateway for this swarm if it has not
-// already been created.
+// already been created. A failed apply still marks the Gateway for cleanup,
+// because AX may have persisted it before reporting the error.
 func (e *SwarmEnv) CreateGateway(ctx context.Context, allowHosts []string) error {
 	if e.GatewayCreated {
 		return nil
 	}
-	if err := e.AX.Apply(ctx, GatewayManifest(e.Name, allowHosts)); err != nil {
-		return err
-	}
+	err := e.AX.Apply(ctx, GatewayManifest(e.Name, allowHosts))
 	e.GatewayCreated = true
-	return nil
+	return err
 }
 
 // CreateWorkspace creates the single shared Workspace for this swarm if it has
-// not already been created.
+// not already been created. A failed apply still marks the Workspace for
+// cleanup, because AX may have persisted it (e.g. in a Failed phase).
 func (e *SwarmEnv) CreateWorkspace(ctx context.Context, image string, repos, setupCmds []string) error {
 	if e.WorkspaceCreated {
 		return nil
 	}
-	if err := e.AX.Apply(ctx, WorkspaceManifest(e.Name, image, repos, setupCmds)); err != nil {
-		return err
-	}
+	err := e.AX.Apply(ctx, WorkspaceManifest(e.Name, image, repos, setupCmds))
 	e.WorkspaceCreated = true
-	return nil
+	return err
 }
 
 // Setup creates the single Gateway and single Workspace for the swarm and waits
@@ -481,14 +531,18 @@ func (e *SwarmEnv) CleanupWithResult(ctx context.Context) CleanupResult {
 
 	if e.WorkspaceCreated {
 		if delErr := e.AX.Delete(ctx, "workspace", e.Name); delErr != nil {
-			errs = append(errs, delErr)
+			if !isNotFound(delErr) {
+				errs = append(errs, delErr)
+			}
 		} else {
 			res.WorkspaceDeleted = true
 		}
 	}
 	if e.GatewayCreated {
 		if delErr := e.AX.Delete(ctx, "gateway", e.Name); delErr != nil {
-			errs = append(errs, delErr)
+			if !isNotFound(delErr) {
+				errs = append(errs, delErr)
+			}
 		} else {
 			res.GatewayDeleted = true
 		}
@@ -498,6 +552,15 @@ func (e *SwarmEnv) CleanupWithResult(ctx context.Context) CleanupResult {
 		res.Err = errors.Join(errs...)
 	}
 	return res
+}
+
+// isNotFound reports whether an ax CLI error means the resource does not exist.
+func isNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "not found") || strings.Contains(msg, "notfound")
 }
 
 // Cleanup deletes all AX Tasks created under <name>-*, then the Workspace and Gateway,

@@ -15,18 +15,21 @@
 package main
 
 import (
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 )
 
 func TestBuildSwarmPrompt(t *testing.T) {
 	cfg := Config{
-		Goal:      "Analyze chalk's API\nand weak spots",
-		Name:      "swarm-abc123",
-		Atespace:  "default",
-		Parallel:  6,
-		Repos:     []string{"https://github.com/chalk/chalk"},
-		SetupCmds: []string{"npm ci"},
+		Goal:       "Analyze chalk's API\nand weak spots",
+		Name:       "swarm-abc123",
+		Atespace:   "default",
+		Parallel:   6,
+		Repos:      []string{"https://github.com/chalk/chalk"},
+		SetupCmds:  []string{"npm ci"},
+		AutoResume: true,
 	}
 
 	prompt := BuildSwarmPrompt(cfg, "/Users/jbd/ax/bin/ax -a default")
@@ -51,10 +54,14 @@ func TestBuildSwarmPrompt(t *testing.T) {
 		"tell them NOT to create new Workspaces or Gateways",
 		"name: swarm-abc123-<step>",
 		"debug: true",
-		"/Users/jbd/ax/bin/ax -a default apply -f -",
-		"/Users/jbd/ax/bin/ax -a default get tasks",
-		"/Users/jbd/ax/bin/ax -a default resume task swarm-abc123-<step>",
-		"/Users/jbd/ax/bin/ax -a default ssh swarm-abc123-<step> -- sh -lc 'cd /workspace && <command>'",
+		"Create and start an AX Task (ONE shell call)",
+		"ax-swarm resumes them automatically",
+		"T=swarm-abc123-<step>",
+		"/Users/jbd/ax/bin/ax -a default apply -f - <<'EOF'",
+		"/Users/jbd/ax/bin/ax -a default get tasks | awk",
+		"/Users/jbd/ax/bin/ax -a default resume task \"$T\"",
+		"Execute Commands inside `/workspace` (batch them)",
+		"/Users/jbd/ax/bin/ax -a default ssh swarm-abc123-<step> -- sh -lc 'cd /workspace && <command 1> && <command 2>'",
 		"/Users/jbd/ax/bin/ax -a default suspend task swarm-abc123-<step>",
 		"/Users/jbd/ax/bin/ax -a default delete task swarm-abc123-<step>",
 		"Clean up completed tasks.",
@@ -63,6 +70,43 @@ func TestBuildSwarmPrompt(t *testing.T) {
 		if !strings.Contains(prompt, s) {
 			t.Errorf("prompt missing expected snippet %q", s)
 		}
+	}
+}
+
+// TestCreateAndStartBlockRuns executes the one-shot create-and-start block from
+// the prompt against a fake ax that reports Suspended, then Running after a
+// resume, and checks that the loop resumes the task and exits on Running.
+func TestCreateAndStartBlockRuns(t *testing.T) {
+	dir := t.TempDir()
+	fakeAX := dir + "/ax"
+	state := dir + "/state"
+	script := `#!/bin/sh
+case "$*" in
+  *"apply -f -"*) cat >/dev/null; echo Suspended > "` + state + `"; echo created ;;
+  *"get tasks"*) echo "NAME ATESPACE STATE"; echo "swarm-abc123-probe default $(cat "` + state + `")" ;;
+  *"resume task"*) echo Running > "` + state + `"; echo resumed ;;
+esac
+`
+	if err := os.WriteFile(fakeAX, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	prompt := BuildSwarmPrompt(Config{Goal: "x", Name: "swarm-abc123", Atespace: "default", Parallel: 1, AutoResume: true}, fakeAX)
+	start := strings.Index(prompt, "```bash\nT=")
+	if start < 0 {
+		t.Fatalf("create-and-start block not found in prompt")
+	}
+	block := prompt[start+len("```bash\n"):]
+	block = block[:strings.Index(block, "```")]
+	block = strings.ReplaceAll(block, "<step>", "probe")
+	block = strings.ReplaceAll(block, "<concise step goal>", "probe")
+
+	out, err := exec.Command("/bin/sh", "-c", block).CombinedOutput()
+	if err != nil {
+		t.Fatalf("block failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "swarm-abc123-probe: Running") {
+		t.Fatalf("block did not reach Running:\n%s", out)
 	}
 }
 

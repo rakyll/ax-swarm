@@ -284,3 +284,31 @@ func TestSingleWorkspaceAndGatewayPerSwarm(t *testing.T) {
 		t.Fatalf("created gateways=%d workspaces=%d, want 1 and 1", gateways, workspaces)
 	}
 }
+
+func TestAutoResumerOnlyStartsNewTasks(t *testing.T) {
+	r := newAutoResumer(3 * time.Second)
+	now := time.Now()
+
+	// A newly created Suspended task is resumed.
+	due := r.due([]AXTaskInfo{{Name: "s-a", State: "Suspended"}}, now)
+	if len(due) != 1 || due[0].Name != "s-a" {
+		t.Fatalf("expected s-a to be resumed, got %v", due)
+	}
+	// Not retried before the retry interval.
+	if due := r.due([]AXTaskInfo{{Name: "s-a", State: "Suspended"}}, now.Add(time.Second)); len(due) != 0 {
+		t.Fatalf("expected no retry within interval, got %v", due)
+	}
+	// Retried after the interval if still Suspended.
+	if due := r.due([]AXTaskInfo{{Name: "s-a", State: "Suspended"}}, now.Add(4*time.Second)); len(due) != 1 {
+		t.Fatalf("expected retry after interval, got %v", due)
+	}
+	// Once it has been Running, a later Suspended (suspended on purpose) is left alone.
+	r.due([]AXTaskInfo{{Name: "s-a", State: "Running"}}, now.Add(5*time.Second))
+	if due := r.due([]AXTaskInfo{{Name: "s-a", State: "Suspended"}}, now.Add(20*time.Second)); len(due) != 0 {
+		t.Fatalf("expected deliberately suspended task to be left alone, got %v", due)
+	}
+	// Failed/Crashed tasks are never resumed.
+	if due := r.due([]AXTaskInfo{{Name: "s-b", State: "Crashed"}}, now); len(due) != 0 {
+		t.Fatalf("expected crashed task to be left alone, got %v", due)
+	}
+}

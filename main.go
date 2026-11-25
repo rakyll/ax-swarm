@@ -69,6 +69,7 @@ type Config struct {
 	Project                    string
 	DangerouslySkipPermissions bool
 	DryRun                     bool
+	AutoResume                 bool
 }
 
 type stringSliceFlag []string
@@ -223,6 +224,7 @@ Environment:
 	fs.StringVar(&cfg.Project, "project", "", "project ID or name passed to agy --project")
 	fs.BoolVar(&cfg.DangerouslySkipPermissions, "dangerously-skip-permissions", false, "pass --dangerously-skip-permissions to agy")
 	fs.BoolVar(&cfg.DryRun, "dry-run", false, "print the agy command and /swarm prompt without creating AX resources or launching agy")
+	fs.BoolVar(&cfg.AutoResume, "auto-resume", true, "automatically resume newly created swarm tasks that are waiting in Suspended")
 
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
@@ -440,6 +442,9 @@ func runHeadless(cfg Config, env *SwarmEnv, stdin io.Reader, stdout, stderr io.W
 
 	if err := env.Setup(runCtx, cfg, ui); err != nil {
 		fmt.Fprintf(stderr, "%s\n", ui.Paint("ax-swarm: "+err.Error(), ansiRed))
+		if hint := axErrorHint(err.Error(), cfg.Name); hint != "" {
+			fmt.Fprintln(stderr, ui.Paint(hint, ansiDim))
+		}
 		return 1
 	}
 
@@ -460,6 +465,7 @@ func runHeadless(cfg Config, env *SwarmEnv, stdin io.Reader, stdout, stderr io.W
 		defer pollWG.Done()
 		prev := make(map[string]string)
 		firstSeen := make(map[string]time.Time)
+		resumer := newAutoResumer(3 * time.Second)
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
 		for {
@@ -493,6 +499,13 @@ func runHeadless(cfg Config, env *SwarmEnv, stdin io.Reader, stdout, stderr io.W
 					}
 				}
 				prev = curr
+				if cfg.AutoResume {
+					for _, t := range resumer.due(tasks, now) {
+						if err := env.AX.Resume(pollCtx, t.Name); err == nil {
+							ui.Log("↻ ax-swarm resumed ax task " + t.Name)
+						}
+					}
+				}
 			}
 		}
 	}()

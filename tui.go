@@ -27,6 +27,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/lipgloss/table"
 	"github.com/muesli/termenv"
 )
 
@@ -76,6 +77,10 @@ type taskPollTickMsg struct{}
 type taskListMsg struct {
 	tasks []AXTaskInfo
 	err   error
+}
+type taskResumedMsg struct {
+	name string
+	err  error
 }
 type cleanupDoneMsg struct{ res CleanupResult }
 
@@ -141,6 +146,7 @@ type tuiModel struct {
 	spinner  spinner.Model
 	input    textinput.Model
 	inputErr string
+	width    int
 
 	setupCtx      context.Context
 	cancelSetup   context.CancelFunc
@@ -161,11 +167,15 @@ type tuiModel struct {
 	swarmTitle  string
 	workers     map[string]string
 	workerOrder []string
+	workerSince map[string]time.Time
 	seenSeq     map[int]bool
 
 	tasks          []AXTaskInfo
 	prevTaskStates map[string]string
 	taskFirstSeen  map[string]time.Time
+	taskStateSince map[string]time.Time
+	resumer        *autoResumer
+	resumeErrShown map[string]bool
 	taskPollCount  int
 	lastPollErr    string
 
@@ -227,9 +237,13 @@ func newTUIModel(cfg Config, env *SwarmEnv, styles tuiStyles, starter agyStarter
 		agyModel:       cfg.Model,
 		agyStatus:      "starting agy /swarm",
 		workers:        make(map[string]string),
+		workerSince:    make(map[string]time.Time),
 		seenSeq:        make(map[int]bool),
 		prevTaskStates: make(map[string]string),
 		taskFirstSeen:  make(map[string]time.Time),
+		taskStateSince: make(map[string]time.Time),
+		resumer:        newAutoResumer(3 * time.Second),
+		resumeErrShown: make(map[string]bool),
 	}
 }
 
@@ -243,6 +257,7 @@ func (m tuiModel) Init() tea.Cmd {
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		m.width = msg.Width
 		w := msg.Width - 8
 		if w < 20 {
 			w = 20
@@ -629,8 +644,10 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				prev, existed := m.prevTaskStates[t.Step]
 				if !existed {
 					m.taskFirstSeen[t.Step] = now
+					m.taskStateSince[t.Step] = now
 					cmds = append(cmds, tea.Println(m.formatTaskCreated(t.Name, t.State)))
 				} else if prev != t.State {
+					m.taskStateSince[t.Step] = now
 					cmds = append(cmds, tea.Println(m.formatTaskTransition(t.Name, prev, t.State)))
 				}
 			}
@@ -646,13 +663,41 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.styles.subtle.Render(ran),
 					)))
 					delete(m.taskFirstSeen, step)
+					delete(m.taskStateSince, step)
 				}
 			}
 			m.prevTaskStates = seenNow
 			m.tasks = msg.tasks
+			if m.cfg.AutoResume && m.resumer != nil {
+				for _, t := range m.resumer.due(msg.tasks, now) {
+					cmds = append(cmds, m.resumeTaskCmd(t.Name))
+				}
+			}
 		}
 		cmds = append(cmds, m.scheduleTaskPollCmd())
 		return m, tea.Batch(cmds...)
+
+	case taskResumedMsg:
+		if m.stage != stageRunningAgy {
+			return m, nil
+		}
+		if msg.err == nil {
+			return m, tea.Println(fmt.Sprintf("%s ax-swarm resumed ax task %s",
+				m.styles.swarmName.Render("↻"),
+				m.styles.swarmName.Render(msg.name),
+			))
+		}
+		// A worker may have resumed or deleted the task first; report other
+		// failures once per task.
+		if isNotFound(msg.err) || strings.Contains(strings.ToLower(msg.err.Error()), "running") || m.resumeErrShown[msg.name] {
+			return m, nil
+		}
+		m.resumeErrShown[msg.name] = true
+		return m, tea.Println(fmt.Sprintf("%s could not resume ax task %s: %s",
+			m.styles.warnIcon.Render("!"),
+			m.styles.swarmName.Render(msg.name),
+			m.styles.subtle.Render(oneLinePreview(msg.err.Error(), 100)),
+		))
 
 	case cleanupDoneMsg:
 		m.cleanupRan = true
@@ -683,6 +728,9 @@ func (m *tuiModel) setWorkerState(name, state string) {
 	}
 	if _, exists := m.workers[name]; !exists {
 		m.workerOrder = append(m.workerOrder, name)
+		if m.workerSince != nil {
+			m.workerSince[name] = time.Now()
+		}
 	}
 	if state == "" {
 		state = "working"
@@ -827,6 +875,14 @@ func (m tuiModel) pollTasksCmd() tea.Cmd {
 	}
 }
 
+func (m tuiModel) resumeTaskCmd(name string) tea.Cmd {
+	ctx := m.agyCtx
+	ax := m.env.AX
+	return func() tea.Msg {
+		return taskResumedMsg{name: name, err: ax.Resume(ctx, name)}
+	}
+}
+
 func (m tuiModel) cleanupCmd() tea.Cmd {
 	env := m.env
 	return func() tea.Msg {
@@ -849,40 +905,8 @@ func (m tuiModel) View() string {
 		if m.lineBuf != "" {
 			b.WriteString(m.lineBuf + "\n")
 		}
-		if len(m.workerOrder) > 0 {
-			var parts []string
-			for _, name := range m.workerOrder {
-				st := m.workers[name]
-				icon := m.styles.okIcon.Render("●")
-				if st == "waiting" {
-					icon = m.styles.warnIcon.Render("○")
-				} else if st == "killed" {
-					icon = m.styles.infoIcon.Render("×")
-				}
-				parts = append(parts, fmt.Sprintf("%s %s %s", icon, m.styles.workerName.Render(name), m.styles.subtle.Render("("+st+")")))
-			}
-			b.WriteString(m.styles.metaKey.Render("workers") + strings.Join(parts, "  ") + "\n")
-		}
-		if len(m.tasks) > 0 {
-			var parts []string
-			now := time.Now()
-			for _, t := range m.tasks {
-				icon := m.styles.infoIcon.Render("…")
-				switch t.State {
-				case "Running":
-					icon = m.styles.okIcon.Render("▶")
-				case "Suspended":
-					icon = m.styles.warnIcon.Render("⏸")
-				case "Failed", "Crashed":
-					icon = m.styles.errIcon.Render("✗")
-				}
-				detail := t.State
-				if since, ok := m.taskFirstSeen[t.Step]; ok {
-					detail += " · " + formatElapsed(now.Sub(since))
-				}
-				parts = append(parts, fmt.Sprintf("%s %s %s", icon, m.styles.swarmName.Render(t.Step), m.styles.subtle.Render("("+detail+")")))
-			}
-			b.WriteString(m.styles.metaKey.Render("ax tasks") + strings.Join(parts, "  ") + "\n")
+		if tbl := m.renderSwarmTable(); tbl != "" {
+			b.WriteString(tbl + "\n")
 		}
 		if m.taskPollCount > 0 {
 			b.WriteString(m.styles.metaKey.Render("ax check") + m.renderAXCheckSummary() + "\n")
@@ -903,7 +927,7 @@ func (m tuiModel) View() string {
 		if m.cancelled {
 			b.WriteString(m.styles.warnIcon.Render("Canceled.") + "\n")
 		} else if m.agyErr != nil {
-			b.WriteString(m.styles.errBox.Render("Error: "+m.formatAgyError()) + "\n")
+			b.WriteString(m.renderError(m.formatAgyError(), 0) + "\n")
 		}
 		return b.String()
 	}
@@ -993,9 +1017,9 @@ func (m tuiModel) View() string {
 		if m.cancelled {
 			b.WriteString("\n  " + m.styles.warnIcon.Render("Canceled.") + "\n")
 		} else if m.err != nil {
-			b.WriteString("\n  " + m.styles.errBox.Render("Error: "+m.err.Error()) + "\n")
+			b.WriteString("\n  " + m.renderError(m.err.Error(), 2) + "\n")
 		} else if m.agyErr != nil {
-			b.WriteString("\n  " + m.styles.errBox.Render("Error: "+m.formatAgyError()) + "\n")
+			b.WriteString("\n  " + m.renderError(m.formatAgyError(), 2) + "\n")
 		}
 	}
 
@@ -1016,6 +1040,92 @@ func (m tuiModel) renderStep(st stepEntry) string {
 		icon = m.styles.errIcon.Render("✗")
 	}
 	return fmt.Sprintf("%s %s", icon, st.text)
+}
+
+type swarmTableRow struct {
+	kind  string
+	name  string
+	state string
+	age   string
+}
+
+// renderSwarmTable renders swarm workers and AX tasks as one aligned table.
+func (m tuiModel) renderSwarmTable() string {
+	now := time.Now()
+	var rows []swarmTableRow
+	for _, name := range m.workerOrder {
+		age := ""
+		if since, ok := m.workerSince[name]; ok {
+			age = formatElapsed(now.Sub(since))
+		}
+		rows = append(rows, swarmTableRow{kind: "worker", name: name, state: m.workers[name], age: age})
+	}
+	for _, t := range m.tasks {
+		age := ""
+		if since, ok := m.taskStateSince[t.Step]; ok {
+			age = formatElapsed(now.Sub(since))
+		}
+		state := t.State
+		if state == "" {
+			state = "Starting"
+		}
+		rows = append(rows, swarmTableRow{kind: "ax task", name: t.Name, state: state, age: age})
+	}
+	if len(rows) == 0 {
+		return ""
+	}
+
+	data := make([][]string, len(rows))
+	for i, r := range rows {
+		data[i] = []string{r.kind, r.name, r.state, r.age}
+	}
+
+	cell := m.styles.metaVal.Padding(0, 1)
+	header := m.styles.subtle.Bold(true).Padding(0, 1)
+	t := table.New().
+		Border(lipgloss.RoundedBorder()).
+		BorderStyle(m.styles.subtle).
+		Headers("TYPE", "NAME", "STATE", "FOR").
+		Rows(data...).
+		StyleFunc(func(row, col int) lipgloss.Style {
+			if row == table.HeaderRow {
+				return header
+			}
+			if row < 0 || row >= len(rows) {
+				return cell
+			}
+			r := rows[row]
+			switch col {
+			case 0:
+				return m.styles.subtle.Padding(0, 1)
+			case 1:
+				if r.kind == "worker" {
+					return m.styles.workerName.Padding(0, 1)
+				}
+				return m.styles.swarmName.Padding(0, 1)
+			case 2:
+				return m.stateStyle(r.state).Padding(0, 1)
+			case 3:
+				return m.styles.subtle.Padding(0, 1)
+			}
+			return cell
+		})
+	return t.Render()
+}
+
+func (m tuiModel) stateStyle(state string) lipgloss.Style {
+	switch state {
+	case "Running", "working":
+		return m.styles.okIcon
+	case "Suspended", "waiting":
+		return m.styles.warnIcon
+	case "Failed", "Crashed":
+		return m.styles.errIcon
+	case "killed":
+		return m.styles.infoIcon
+	default:
+		return m.styles.subtle
+	}
 }
 
 func (m tuiModel) renderAXCheckSummary() string {
@@ -1081,6 +1191,43 @@ func (m tuiModel) formatAgyError() string {
 	return m.agyErr.Error()
 }
 
+// renderError formats an error so the whole message stays visible: it is
+// word-wrapped to the terminal width (Bubble Tea truncates long lines) and
+// continuation lines are indented to line up under the first.
+func (m tuiModel) renderError(msg string, indent int) string {
+	width := m.width
+	if width <= 0 {
+		width = 80
+	}
+	wrapAt := width - indent - 1
+	if wrapAt < 20 {
+		wrapAt = 20
+	}
+	pad := strings.Repeat(" ", indent)
+	body := m.styles.errBox.Width(wrapAt).Render("Error: " + msg)
+	body = strings.ReplaceAll(body, "\n", "\n"+pad)
+	if hint := axErrorHint(msg, m.cfg.Name); hint != "" {
+		hintText := m.styles.subtle.Width(wrapAt).Render(hint)
+		body += "\n" + pad + strings.ReplaceAll(hintText, "\n", "\n"+pad)
+	}
+	return body
+}
+
+// axErrorHint explains errors that come from the AX cluster rather than ax-swarm.
+func axErrorHint(msg, swarmName string) string {
+	lower := strings.ToLower(msg)
+	switch {
+	case strings.Contains(lower, "runsc") || strings.Contains(lower, "callateletrestore"):
+		return "The AX cluster could not start a sandbox (gVisor/runsc). This is an AX cluster problem, " +
+			"not an ax-swarm one: check `ax local status` and the atelet logs " +
+			"(`kubectl -n ate-system logs ds/atelet --all-containers`), or restart the local cluster."
+	case strings.Contains(lower, "preparing workspace") || strings.Contains(lower, "failed setup"):
+		return fmt.Sprintf("AX failed to set up the Workspace. Rerun with --keep to inspect it with "+
+			"`ax describe workspace %s`.", swarmName)
+	}
+	return ""
+}
+
 func oneLinePreview(s string, maxLen int) string {
 	clean := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", " "), "\n", " "))
 	for strings.Contains(clean, "  ") {
@@ -1116,13 +1263,17 @@ func runTUI(cfg Config, env *SwarmEnv, stdin io.Reader, stdout, stderr io.Writer
 	p := tea.NewProgram(model, tea.WithInput(stdin), tea.WithOutput(stderr))
 	finalModel, err := p.Run()
 	if err != nil {
-		// Ensure AX resources are still cleaned up if Bubble Tea itself failed.
+		// p.Run also returns an error when ax-swarm is killed (SIGTERM), with
+		// the live model: stop agy first, then clean up AX resources.
+		if killed, ok := finalModel.(tuiModel); ok {
+			stopAgy(killed.cancelAgy, killed.agyCh, 10*time.Second)
+		}
 		if !cfg.Keep && (env.GatewayCreated || env.WorkspaceCreated) {
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
 			env.CleanupWithResult(ctx)
 		}
-		fmt.Fprintf(stderr, "ax-swarm: tui error: %v\n", err)
+		fmt.Fprintf(stderr, "ax-swarm: %v\n", err)
 		return 1
 	}
 
@@ -1130,6 +1281,12 @@ func runTUI(cfg Config, env *SwarmEnv, stdin io.Reader, stdout, stderr io.Writer
 	if !ok {
 		return 0
 	}
+
+	// Stop the background agy and wait for it to exit before cleaning up, so it
+	// cannot recreate AX tasks after cleanup and is never left orphaned when
+	// ax-swarm returns (os.Exit would otherwise skip the asynchronous kill).
+	stopAgy(final.cancelAgy, final.agyCh, 10*time.Second)
+
 	if !final.cleanupRan && !cfg.Keep && (env.GatewayCreated || env.WorkspaceCreated) {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()

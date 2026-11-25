@@ -180,3 +180,23 @@ func TestStartAgyStreamCancelStopsProcess(t *testing.T) {
 		}
 	}
 }
+
+func TestStopAgyWaitsForProcessExit(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch, err := StartAgyStream(ctx, "/bin/sh", []string{"-c", "echo started; sleep 30"})
+	if err != nil {
+		t.Fatalf("StartAgyStream() error: %v", err)
+	}
+	if ev := <-ch; ev.Kind != AgyEventText {
+		t.Fatalf("expected started line, got %+v", ev)
+	}
+	start := time.Now()
+	stopAgy(cancel, ch, 5*time.Second)
+	if elapsed := time.Since(start); elapsed > 4*time.Second {
+		t.Fatalf("stopAgy took %s; process was not stopped promptly", elapsed)
+	}
+	if _, ok := <-ch; ok {
+		t.Fatalf("event channel still open after stopAgy; agy has not exited")
+	}
+}
