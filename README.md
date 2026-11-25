@@ -1,14 +1,14 @@
 # ax-swarm
 
-Run an [AX](https://github.com/google/ax) workspace swarm driven by Antigravity CLI's native `/swarm` capability (`agy -i "/swarm ..."`).
+Run an [AX](https://github.com/google/ax) workspace swarm driven by Antigravity CLI's native `/swarm` capability (`agy --output-format stream-json -p "/swarm ..."`).
 
-`ax-swarm` provisions **one shared AX `Gateway` and one shared AX `Workspace` per swarm**, hands off to an interactive `agy /swarm` session so the swarm directly plans and controls AX `Task` execution via the `ax` CLI (reusing that single Workspace and Gateway across every Task), and cleans up all `<swarm-name>-*` tasks plus the Workspace and Gateway when you exit.
+`ax-swarm` provisions **one shared AX `Gateway` and one shared AX `Workspace` per swarm**, runs `agy /swarm` in the background while streaming only its outputs, and cleans up all `<swarm-name>-*` tasks plus the Workspace and Gateway when done.
 
 ## How It Works
 
 1. **Setup**: Creates one AX `Gateway` and one AX `Workspace` for the swarm, clones any `--repo` URLs, runs any `--setup-cmd` commands, and waits until the Workspace is ready.
-2. **Run**: Hands the terminal to `agy -i "/swarm ..."`. The swarm splits up the work and uses `ax` directly to create, resume, run commands in (`ax ssh`), and delete parallel Tasks—all sharing that one Workspace and Gateway.
-3. **Cleanup**: When `agy` exits (or you press `Ctrl+C`), deletes any remaining `<swarm-name>-*` Tasks, the Workspace, and the Gateway unless `--keep` is set.
+2. **Run**: Starts `agy /swarm` in the background (`--output-format stream-json -p`) and streams only outputs from `agy`. The swarm splits up the work and uses `ax` directly to create, resume, run commands in (`ax ssh`), and delete parallel Tasks—all sharing that one Workspace and Gateway.
+3. **Cleanup**: When `agy` finishes (or you press `Ctrl+C`), stops any running background `agy` process and deletes any remaining `<swarm-name>-*` Tasks, the Workspace, and the Gateway unless `--keep` is set.
 
 ## Prerequisites
 
@@ -166,6 +166,5 @@ go vet ./...
 
 ## Repository Layout
 
-- Root (`*.go`, `go.mod`): Go `ax-swarm` CLI with Bubble Tea UI and `agy /swarm` integration.
-- `ax-swarm.py`: Earlier standalone Python implementation using a direct Gemini JSON planner loop.
+- Root (`*.go`, `go.mod`, `Makefile`): Go `ax-swarm` CLI with Bubble Tea UI and `agy /swarm` integration.
 - `agy/`: Earlier Node.js external swarm coordinator server, wake-on-`@mention` reconciler, `swarm_board` viewer, and AX Python benchmarks.

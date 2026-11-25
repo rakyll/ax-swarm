@@ -131,6 +131,17 @@ func (a *AX) ListTasksWithPrefix(ctx context.Context, prefix string) ([]string, 
 	return parseTableNamesWithPrefix(out, prefix), nil
 }
 
+// ListTaskCountsWithPrefix returns the number of Running tasks and total tasks
+// whose names start with prefix.
+func (a *AX) ListTaskCountsWithPrefix(ctx context.Context, prefix string) (running, total int, err error) {
+	out, err := a.run(ctx, nil, "get", "tasks")
+	if err != nil {
+		return 0, 0, err
+	}
+	running, total = parseTableTaskCountsWithPrefix(out, prefix)
+	return running, total, nil
+}
+
 // Delete deletes a resource by kind and name.
 func (a *AX) Delete(ctx context.Context, kind, name string) error {
 	_, err := a.run(ctx, nil, "delete", kind, name)
@@ -179,6 +190,34 @@ func parseTableNamesWithPrefix(out, prefix string) []string {
 		}
 	}
 	return names
+}
+
+func parseTableTaskCountsWithPrefix(out, prefix string) (running, total int) {
+	lines := nonEmptyLines(out)
+	if len(lines) < 2 {
+		return 0, 0
+	}
+	header := strings.Fields(lines[0])
+	if len(header) == 0 || header[0] != "NAME" {
+		return 0, 0
+	}
+	stateIdx := -1
+	for i, h := range header {
+		if h == "STATE" {
+			stateIdx = i
+			break
+		}
+	}
+	for _, line := range lines[1:] {
+		fields := strings.Fields(line)
+		if len(fields) > 0 && strings.HasPrefix(fields[0], prefix) {
+			total++
+			if stateIdx >= 0 && len(fields) > stateIdx && fields[stateIdx] == "Running" {
+				running++
+			}
+		}
+	}
+	return running, total
 }
 
 func nonEmptyLines(s string) []string {

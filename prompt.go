@@ -19,7 +19,7 @@ import (
 	"strings"
 )
 
-// BuildSwarmPrompt constructs the initial `/swarm ...` prompt passed to `agy -i`.
+// BuildSwarmPrompt constructs the `/swarm ...` prompt passed to `agy -p`.
 // The prompt places `/swarm` at byte 0 so agy activates its native swarm mode,
 // and instructs the swarm to own and drive all task execution directly inside
 // AX Tasks via raw `ax` CLI commands.

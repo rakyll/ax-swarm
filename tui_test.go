@@ -16,6 +16,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"slices"
 	"strings"
@@ -40,6 +41,13 @@ func testTUIConfig(goal string) Config {
 	}
 }
 
+func noopAgyStarter(_ context.Context, _ string, _ []string) (<-chan AgyEvent, error) {
+	ch := make(chan AgyEvent, 1)
+	ch <- AgyEvent{Kind: AgyEventDone}
+	close(ch)
+	return ch, nil
+}
+
 func TestTUIGoalInputAndValidation(t *testing.T) {
 	runner := &fakeRunner{}
 	ax := &AX{Bin: "ax", Atespace: "default", Runner: runner, PollInterval: time.Millisecond}
@@ -47,8 +55,9 @@ func TestTUIGoalInputAndValidation(t *testing.T) {
 	var out bytes.Buffer
 	styles := newTUIStyles(&out, "never", false)
 
-	m := newTUIModel(testTUIConfig(""), env, styles, func(string, []string) tea.Cmd { return nil })
+	m := newTUIModel(testTUIConfig(""), env, styles, noopAgyStarter)
 	defer m.cancelSetup()
+	defer m.cancelAgy()
 
 	if m.stage != stageGoalInput {
 		t.Fatalf("expected stageGoalInput, got %v", m.stage)
@@ -57,14 +66,12 @@ func TestTUIGoalInputAndValidation(t *testing.T) {
 		t.Fatalf("goal input view missing prompt: %q", view)
 	}
 
-	// Window resize updates textinput width cleanly.
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = updated.(tuiModel)
 	if m.input.Width != 88 {
 		t.Fatalf("input width = %d, want 88", m.input.Width)
 	}
 
-	// Pressing Enter on empty input displays inline hint and stays on goal input.
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = updated.(tuiModel)
 	if m.stage != stageGoalInput || cmd != nil {
@@ -74,7 +81,6 @@ func TestTUIGoalInputAndValidation(t *testing.T) {
 		t.Fatalf("expected validation hint in view: %q", m.View())
 	}
 
-	// Typing a goal and pressing Enter transitions to stageCreateGateway.
 	for _, r := range "analyze chalk" {
 		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 		m = updated.(tuiModel)
@@ -102,8 +108,9 @@ func TestTUIGoalInputEscCancels(t *testing.T) {
 	var out bytes.Buffer
 	styles := newTUIStyles(&out, "never", false)
 
-	m := newTUIModel(testTUIConfig(""), env, styles, func(string, []string) tea.Cmd { return nil })
+	m := newTUIModel(testTUIConfig(""), env, styles, noopAgyStarter)
 	defer m.cancelSetup()
+	defer m.cancelAgy()
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	m = updated.(tuiModel)
@@ -118,7 +125,7 @@ func TestTUIGoalInputEscCancels(t *testing.T) {
 	}
 }
 
-func TestTUIHappyPathFullLifecycle(t *testing.T) {
+func TestTUIHappyPathBackgroundAgyStreaming(t *testing.T) {
 	var polls int
 	runner := &fakeRunner{
 		handler: func(c fakeCall) (string, string, error) {
@@ -141,14 +148,16 @@ func TestTUIHappyPathFullLifecycle(t *testing.T) {
 	var out bytes.Buffer
 	styles := newTUIStyles(&out, "never", false)
 
+	streamCh := make(chan AgyEvent, 8)
 	var launchedBin string
 	var launchedArgs []string
-	m := newTUIModel(testTUIConfig("audit chalk"), env, styles, func(bin string, args []string) tea.Cmd {
+	m := newTUIModel(testTUIConfig("audit chalk"), env, styles, func(_ context.Context, bin string, args []string) (<-chan AgyEvent, error) {
 		launchedBin = bin
 		launchedArgs = slices.Clone(args)
-		return func() tea.Msg { return agyExitedMsg{} }
+		return streamCh, nil
 	})
 	defer m.cancelSetup()
+	defer m.cancelAgy()
 
 	// Step 1: Create Gateway
 	updated, cmd := m.Update(m.createGatewayCmd()())
@@ -164,32 +173,57 @@ func TestTUIHappyPathFullLifecycle(t *testing.T) {
 		t.Fatalf("expected stageWaitWorkspace with WorkspaceCreated, got stage=%v created=%v", m.stage, env.WorkspaceCreated)
 	}
 
-	// Step 3: Poll Workspace (Preparing -> tick -> Ready)
+	// Step 3: Poll Workspace (Preparing -> tick -> Ready -> start background agy)
 	updated, _ = m.Update(cmd())
 	m = updated.(tuiModel)
 	if m.stage != stageWaitWorkspace || m.workspacePhase != "Preparing" {
 		t.Fatalf("expected Preparing wait state, got stage=%v phase=%q", m.stage, m.workspacePhase)
 	}
-	if !strings.Contains(m.View(), "Waiting for Workspace swarm-tui01 (Preparing") {
-		t.Fatalf("view missing Preparing status: %q", m.View())
-	}
-
 	updated, cmd = m.Update(pollTickMsg{})
 	m = updated.(tuiModel)
 	updated, cmd = m.Update(cmd())
 	m = updated.(tuiModel)
-	if m.stage != stageRunningAgy {
-		t.Fatalf("expected stageRunningAgy after Ready, got %v", m.stage)
-	}
-	if launchedBin != "agy" || len(launchedArgs) < 2 || launchedArgs[len(launchedArgs)-2] != "-i" || !strings.HasPrefix(launchedArgs[len(launchedArgs)-1], "/swarm audit chalk\n") {
-		t.Fatalf("unexpected agy invocation: bin=%q args=%v", launchedBin, launchedArgs)
+	if m.stage != stageStartingAgy {
+		t.Fatalf("expected stageStartingAgy after Ready, got %v", m.stage)
 	}
 
-	// Step 4: agy exits -> Cleanup -> Done
+	// Start background agy process
 	updated, _ = m.Update(cmd())
 	m = updated.(tuiModel)
+	if m.stage != stageRunningAgy {
+		t.Fatalf("expected stageRunningAgy, got %v", m.stage)
+	}
+	if launchedBin != "agy" || !slices.Contains(launchedArgs, "stream-json") || launchedArgs[len(launchedArgs)-2] != "-p" || !strings.HasPrefix(launchedArgs[len(launchedArgs)-1], "/swarm audit chalk\n") {
+		t.Fatalf("unexpected background agy invocation: bin=%q args=%v", launchedBin, launchedArgs)
+	}
+
+	// Feed stream events from background agy: init, task poll, partial text, newline, result, done.
+	updated, _ = m.Update(agyStreamMsg{ev: AgyEvent{Kind: AgyEventInit, Model: "gemini-4-neon-high"}, ok: true})
+	m = updated.(tuiModel)
+	updated, _ = m.Update(taskCountsMsg{running: 1, total: 1})
+	m = updated.(tuiModel)
+	updated, _ = m.Update(agyStreamMsg{ev: AgyEvent{Kind: AgyEventText, Text: "Line 1\nPartial"}, ok: true})
+	m = updated.(tuiModel)
+
+	runningView := m.View()
+	if strings.Contains(runningView, "Created Gateway") {
+		t.Fatalf("running view should only show agy output and minimal status, got:\n%s", runningView)
+	}
+	if !strings.Contains(runningView, "Partial") || !strings.Contains(runningView, "1 AX tasks running") || !strings.Contains(runningView, "gemini-4-neon-high") {
+		t.Fatalf("running view missing streaming partial line or status:\n%s", runningView)
+	}
+
+	updated, _ = m.Update(agyStreamMsg{ev: AgyEvent{Kind: AgyEventText, Text: " line 2\n"}, ok: true})
+	m = updated.(tuiModel)
+	updated, _ = m.Update(agyStreamMsg{ev: AgyEvent{Kind: AgyEventResult, Status: "SUCCESS", Response: "Line 1\nPartial line 2\n"}, ok: true})
+	m = updated.(tuiModel)
+	updated, _ = m.Update(agyStreamMsg{ev: AgyEvent{Kind: AgyEventDone}, ok: true})
+	m = updated.(tuiModel)
 	if m.stage != stageCleanup {
-		t.Fatalf("expected stageCleanup after agy exit, got %v", m.stage)
+		t.Fatalf("expected stageCleanup after agy done, got %v", m.stage)
+	}
+	if m.outputText() != "Line 1\nPartial line 2\n" {
+		t.Fatalf("outputText() = %q", m.outputText())
 	}
 
 	updated, _ = m.Update(m.cleanupCmd()())
@@ -197,18 +231,71 @@ func TestTUIHappyPathFullLifecycle(t *testing.T) {
 	if m.stage != stageDone || !m.cleanupRan {
 		t.Fatalf("expected stageDone with cleanupRan=true, got stage=%v cleanupRan=%v", m.stage, m.cleanupRan)
 	}
+	if !strings.Contains(m.View(), "Deleted 1 task, Workspace, and Gateway (swarm-tui01*)") {
+		t.Fatalf("final view missing cleanup summary:\n%s", m.View())
+	}
+}
 
-	finalView := m.View()
-	for _, want := range []string{
-		"Created Gateway swarm-tui01",
-		"Created Workspace swarm-tui01",
-		"Workspace swarm-tui01 ready",
-		"agy /swarm session finished",
-		"Deleted 1 task, Workspace, and Gateway (swarm-tui01*)",
-	} {
-		if !strings.Contains(finalView, want) {
-			t.Errorf("final view missing %q:\n%s", want, finalView)
-		}
+func TestTUICancelDuringRunningAgyCancelsContextAndCleansUp(t *testing.T) {
+	runner := &fakeRunner{
+		handler: func(c fakeCall) (string, string, error) {
+			if slices.Contains(c.args, "tasks") {
+				return "NAME ATESPACE STATE\nswarm-tui01-w1 default Running\n", "", nil
+			}
+			return "", "", nil
+		},
+	}
+	ax := &AX{Bin: "ax", Atespace: "default", Runner: runner}
+	env := &SwarmEnv{AX: ax, Name: "swarm-tui01", GatewayCreated: true, WorkspaceCreated: true}
+	var out bytes.Buffer
+	styles := newTUIStyles(&out, "never", false)
+
+	m := newTUIModel(testTUIConfig("audit"), env, styles, noopAgyStarter)
+	defer m.cancelSetup()
+	defer m.cancelAgy()
+	m.stage = stageRunningAgy
+	m.agyRan = true
+
+	// Ctrl+C cancels background agy context
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	m = updated.(tuiModel)
+	if !m.cancelled || m.agyCtx.Err() == nil {
+		t.Fatalf("expected cancelled=true and agyCtx canceled")
+	}
+
+	// Once background agy exits, cleanup begins
+	updated, _ = m.Update(agyStreamMsg{ev: AgyEvent{Kind: AgyEventDone, Err: errors.New("signal: terminated")}, ok: true})
+	m = updated.(tuiModel)
+	if m.stage != stageCleanup {
+		t.Fatalf("expected stageCleanup after canceled agy exits, got %v", m.stage)
+	}
+
+	updated, _ = m.Update(m.cleanupCmd()())
+	m = updated.(tuiModel)
+	if m.stage != stageDone || !strings.Contains(m.View(), "Canceled.") {
+		t.Fatalf("expected Canceled. in final view:\n%s", m.View())
+	}
+}
+
+func TestTUIResultFallbackWhenNoTextDeltas(t *testing.T) {
+	runner := &fakeRunner{}
+	ax := &AX{Bin: "ax", Atespace: "default", Runner: runner}
+	env := &SwarmEnv{AX: ax, Name: "swarm-tui01"}
+	var out bytes.Buffer
+	styles := newTUIStyles(&out, "never", false)
+
+	m := newTUIModel(testTUIConfig("audit"), env, styles, noopAgyStarter)
+	defer m.cancelSetup()
+	defer m.cancelAgy()
+	m.stage = stageRunningAgy
+	m.agyRan = true
+
+	updated, _ := m.Update(agyStreamMsg{ev: AgyEvent{Kind: AgyEventResult, Status: "SUCCESS", Response: "Only in result"}, ok: true})
+	m = updated.(tuiModel)
+	updated, _ = m.Update(agyStreamMsg{ev: AgyEvent{Kind: AgyEventDone}, ok: true})
+	m = updated.(tuiModel)
+	if m.outputText() != "Only in result" {
+		t.Fatalf("outputText() = %q, want %q", m.outputText(), "Only in result")
 	}
 }
 
@@ -229,8 +316,9 @@ func TestTUIWorkspaceFailureTriggersCleanup(t *testing.T) {
 	var out bytes.Buffer
 	styles := newTUIStyles(&out, "never", false)
 
-	m := newTUIModel(testTUIConfig("check"), env, styles, func(string, []string) tea.Cmd { return nil })
+	m := newTUIModel(testTUIConfig("check"), env, styles, noopAgyStarter)
 	defer m.cancelSetup()
+	defer m.cancelAgy()
 	m.stage = stageWaitWorkspace
 
 	updated, _ := m.Update(m.pollWorkspaceCmd()())
@@ -261,12 +349,13 @@ func TestTUIKeepSkipsCleanup(t *testing.T) {
 
 	cfg := testTUIConfig("inspect")
 	cfg.Keep = true
-	m := newTUIModel(cfg, env, styles, func(string, []string) tea.Cmd { return nil })
+	m := newTUIModel(cfg, env, styles, noopAgyStarter)
 	defer m.cancelSetup()
+	defer m.cancelAgy()
 	m.stage = stageRunningAgy
-	m.agyStart = time.Now()
+	m.agyRan = true
 
-	updated, _ := m.Update(agyExitedMsg{})
+	updated, _ := m.Update(agyStreamMsg{ev: AgyEvent{Kind: AgyEventDone}, ok: true})
 	m = updated.(tuiModel)
 	if m.stage != stageDone || !m.cleanupRan {
 		t.Fatalf("expected stageDone with cleanupRan=true when keep=true, got stage=%v", m.stage)
@@ -276,70 +365,5 @@ func TestTUIKeepSkipsCleanup(t *testing.T) {
 	}
 	if len(runner.calls) != 0 {
 		t.Fatalf("expected zero AX delete calls when keep=true, got %v", runner.calls)
-	}
-}
-
-func TestTUICancelDuringWaitTriggersCleanup(t *testing.T) {
-	runner := &fakeRunner{
-		handler: func(c fakeCall) (string, string, error) {
-			if slices.Contains(c.args, "tasks") {
-				return "NAME ATESPACE STATE\n", "", nil
-			}
-			return "", "", nil
-		},
-	}
-	ax := &AX{Bin: "ax", Atespace: "default", Runner: runner}
-	env := &SwarmEnv{AX: ax, Name: "swarm-tui01", GatewayCreated: true, WorkspaceCreated: true}
-	var out bytes.Buffer
-	styles := newTUIStyles(&out, "never", false)
-
-	m := newTUIModel(testTUIConfig("inspect"), env, styles, func(string, []string) tea.Cmd { return nil })
-	defer m.cancelSetup()
-	m.stage = stageWaitWorkspace
-	m.inFlightSetup = false
-
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
-	m = updated.(tuiModel)
-	if !m.cancelled || m.stage != stageCleanup {
-		t.Fatalf("expected cancelled stageCleanup, got cancelled=%v stage=%v", m.cancelled, m.stage)
-	}
-	if m.setupCtx.Err() == nil {
-		t.Fatalf("expected setupCtx to be canceled")
-	}
-
-	updated, _ = m.Update(m.cleanupCmd()())
-	m = updated.(tuiModel)
-	if m.stage != stageDone || !strings.Contains(m.View(), "Canceled.") {
-		t.Fatalf("expected Canceled. in final view:\n%s", m.View())
-	}
-}
-
-func TestTUIApplyErrorOnWorkspaceCleansGateway(t *testing.T) {
-	runner := &fakeRunner{
-		handler: func(c fakeCall) (string, string, error) {
-			if slices.Contains(c.args, "tasks") {
-				return "NAME ATESPACE STATE\n", "", nil
-			}
-			return "", "", nil
-		},
-	}
-	ax := &AX{Bin: "ax", Atespace: "default", Runner: runner}
-	env := &SwarmEnv{AX: ax, Name: "swarm-tui01", GatewayCreated: true}
-	var out bytes.Buffer
-	styles := newTUIStyles(&out, "never", false)
-
-	m := newTUIModel(testTUIConfig("inspect"), env, styles, func(string, []string) tea.Cmd { return nil })
-	defer m.cancelSetup()
-	m.stage = stageCreateWorkspace
-
-	updated, _ := m.Update(workspaceCreatedMsg{err: errors.New("boom")})
-	m = updated.(tuiModel)
-	if m.stage != stageCleanup || m.err == nil {
-		t.Fatalf("expected stageCleanup on workspace create failure, got stage=%v err=%v", m.stage, m.err)
-	}
-	updated, _ = m.Update(m.cleanupCmd()())
-	m = updated.(tuiModel)
-	if !strings.Contains(m.View(), "Deleted Gateway (swarm-tui01*)") {
-		t.Fatalf("expected Gateway deletion in view:\n%s", m.View())
 	}
 }

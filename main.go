@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Command ax-swarm sets up an AX Workspace and Gateway and hands off to an
-// interactive `agy -i "/swarm ..."` session so Antigravity's native /swarm
-// capability drives and controls all AX Task execution via the ax CLI.
+// Command ax-swarm sets up a single AX Workspace and Gateway per swarm and runs
+// `agy --output-format stream-json -p "/swarm ..."` in the background, showing
+// only outputs from agy while the swarm controls all AX Task execution via the
+// ax CLI.
 package main
 
 import (
@@ -184,8 +185,9 @@ func parseArgs(args []string, axRoot string, stderr io.Writer) (Config, error) {
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, `Usage: ax-swarm [flags] [goal...]
 
-Sets up an AX Workspace and Gateway and launches an interactive agy /swarm
-session so the swarm drives and controls all AX Task execution via the ax CLI.
+Sets up one AX Workspace and Gateway per swarm, runs agy /swarm in the
+background, and streams outputs from agy while the swarm controls all AX Task
+execution via the ax CLI.
 
 Flags:
 `)
@@ -398,8 +400,9 @@ func run(args []string, stdin *os.File, stdout, stderr *os.File) int {
 		Name: cfg.Name,
 	}
 
+	stdoutTTY := isTerminal(stdout)
 	if stdinTTY && stderrTTY {
-		return runTUI(cfg, env, stdin, stdout, stderr, color)
+		return runTUI(cfg, env, stdin, stdout, stderr, stdoutTTY, color)
 	}
 
 	return runHeadless(cfg, env, stdin, stdout, stderr, color)
@@ -426,16 +429,15 @@ func runHeadless(cfg Config, env *SwarmEnv, stdin io.Reader, stdout, stderr io.W
 		env.Cleanup(cleanupCtx, cfg.Keep, ui)
 	}()
 
-	ui.Log(fmt.Sprintf("%s: setting up AX Workspace in atespace %s, then handing off to %s",
+	ui.Log(fmt.Sprintf("%s: setting up AX Workspace in atespace %s",
 		ui.Paint("swarm "+cfg.Name, ansiBold, ansiCyan),
 		ui.Paint(cfg.Atespace, ansiBold),
-		ui.Paint("agy /swarm", ansiBold, ansiMagenta),
 	))
 
-	setupCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	err := env.Setup(setupCtx, cfg, ui)
-	stopSignals()
-	if err != nil {
+	runCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+
+	if err := env.Setup(runCtx, cfg, ui); err != nil {
 		fmt.Fprintf(stderr, "%s\n", ui.Paint("ax-swarm: "+err.Error(), ansiRed))
 		return 1
 	}
@@ -443,18 +445,68 @@ func runHeadless(cfg Config, env *SwarmEnv, stdin io.Reader, stdout, stderr io.W
 	swarmPrompt := BuildSwarmPrompt(cfg, env.AX.BaseCommandLine())
 	agyArgs := BuildAgyArgs(cfg, swarmPrompt)
 
-	ui.Log(fmt.Sprintf("%s launching interactive %s (workspace %s ready)",
-		ui.Paint("▶", ansiCyan),
-		ui.Paint("agy -i \"/swarm ...\"", ansiBold, ansiMagenta),
-		ui.Paint(cfg.Name, ansiBold),
-	))
+	events, err := StartAgyStream(runCtx, cfg.AgyBin, agyArgs)
+	if err != nil {
+		fmt.Fprintf(stderr, "%s\n", ui.Paint("ax-swarm: "+err.Error(), ansiRed))
+		return 1
+	}
 
-	if err := RunInteractiveAgy(cfg.AgyBin, agyArgs, stdin, stdout, stderr); err != nil {
+	var streamed strings.Builder
+	var finalResponse string
+	var agyStderr []string
+	var resultErr error
+	var waitErr error
+
+	for ev := range events {
+		switch ev.Kind {
+		case AgyEventText:
+			streamed.WriteString(ev.Text)
+			_, _ = io.WriteString(stdout, ev.Text)
+		case AgyEventResult:
+			if ev.Response != "" {
+				finalResponse = ev.Response
+			}
+			if ev.Status == "ERROR" || ev.ErrorText != "" {
+				errMsg := ev.ErrorText
+				if errMsg == "" {
+					errMsg = "agy returned status " + ev.Status
+				}
+				resultErr = errors.New(errMsg)
+			}
+		case AgyEventStderr:
+			if len(agyStderr) < 20 {
+				agyStderr = append(agyStderr, ev.ErrorText)
+			}
+		case AgyEventDone:
+			waitErr = ev.Err
+		}
+	}
+
+	if finalResponse != "" && strings.TrimSpace(streamed.String()) == "" {
+		if !strings.HasSuffix(finalResponse, "\n") {
+			finalResponse += "\n"
+		}
+		_, _ = io.WriteString(stdout, finalResponse)
+	} else if streamed.Len() > 0 && !strings.HasSuffix(streamed.String(), "\n") {
+		_, _ = io.WriteString(stdout, "\n")
+	}
+
+	if runCtx.Err() != nil {
+		return 1
+	}
+	if waitErr != nil {
 		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
+		if errors.As(waitErr, &exitErr) {
+			if len(agyStderr) > 0 {
+				fmt.Fprintf(stderr, "%s\n", ui.Paint("ax-swarm: "+agyStderr[len(agyStderr)-1], ansiRed))
+			}
 			return exitErr.ExitCode()
 		}
-		fmt.Fprintf(stderr, "%s\n", ui.Paint("ax-swarm: "+err.Error(), ansiRed))
+		fmt.Fprintf(stderr, "%s\n", ui.Paint("ax-swarm: "+waitErr.Error(), ansiRed))
+		return 1
+	}
+	if resultErr != nil {
+		fmt.Fprintf(stderr, "%s\n", ui.Paint("ax-swarm: "+resultErr.Error(), ansiRed))
 		return 1
 	}
 	return 0

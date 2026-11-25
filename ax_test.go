@@ -78,6 +78,10 @@ swarm-other-task                  default    Running     swarm-other-task       
 	if !slices.Equal(got, want) {
 		t.Fatalf("got tasks %v, want %v", got, want)
 	}
+	running, total := parseTableTaskCountsWithPrefix(taskOut, "swarm-6c4bcd-")
+	if running != 1 || total != 2 {
+		t.Fatalf("counts = (%d, %d), want (1, 2)", running, total)
+	}
 	if got := parseTableNamesWithPrefix("No tasks found.\n", "swarm-6c4bcd-"); len(got) != 0 {
 		t.Fatalf("expected empty tasks for non-table output, got %v", got)
 	}

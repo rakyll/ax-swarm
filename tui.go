@@ -37,6 +37,7 @@ const (
 	stageCreateGateway
 	stageCreateWorkspace
 	stageWaitWorkspace
+	stageStartingAgy
 	stageRunningAgy
 	stageCleanup
 	stageDone
@@ -63,7 +64,20 @@ type workspacePhaseMsg struct {
 	err   error
 }
 type pollTickMsg struct{}
-type agyExitedMsg struct{ err error }
+type agyStartedMsg struct {
+	ch  <-chan AgyEvent
+	err error
+}
+type agyStreamMsg struct {
+	ev AgyEvent
+	ok bool
+}
+type taskPollTickMsg struct{}
+type taskCountsMsg struct {
+	running int
+	total   int
+	err     error
+}
 type cleanupDoneMsg struct{ res CleanupResult }
 
 type tuiStyles struct {
@@ -112,6 +126,8 @@ func newTUIStyles(out io.Writer, colorMode string, colorEnabled bool) tuiStyles 
 	}
 }
 
+type agyStarter func(ctx context.Context, agyBin string, agyArgs []string) (<-chan AgyEvent, error)
+
 type tuiModel struct {
 	cfg    Config
 	env    *SwarmEnv
@@ -130,29 +146,36 @@ type tuiModel struct {
 
 	workspaceWaitStart time.Time
 	workspacePhase     string
-	agyStart           time.Time
 
-	execAgy func(agyBin string, agyArgs []string) tea.Cmd
+	startAgy      agyStarter
+	agyCtx        context.Context
+	cancelAgy     context.CancelFunc
+	agyCh         <-chan AgyEvent
+	agyStart      time.Time
+	agyModel      string
+	agyActiveTool string
+	agyRan        bool
+	runningTasks  int
+	totalTasks    int
+
+	lineBuf        string
+	streamedOutput string
+	finalResponse  string
+	agyStderr      []string
+	agyResultErr   error
 
 	err        error
 	agyErr     error
 	cancelled  bool
 	cleanupRan bool
+	finalStep  *stepEntry
 }
 
-func defaultExecAgy(stdin io.Reader, stdout, stderr io.Writer) func(string, []string) tea.Cmd {
-	return func(agyBin string, agyArgs []string) tea.Cmd {
-		cmd := exec.Command(agyBin, agyArgs...)
-		cmd.Stdin = stdin
-		cmd.Stdout = stdout
-		cmd.Stderr = stderr
-		return tea.ExecProcess(cmd, func(err error) tea.Msg {
-			return agyExitedMsg{err: err}
-		})
+func newTUIModel(cfg Config, env *SwarmEnv, styles tuiStyles, starter agyStarter) tuiModel {
+	if starter == nil {
+		starter = StartAgyStream
 	}
-}
 
-func newTUIModel(cfg Config, env *SwarmEnv, styles tuiStyles, execAgy func(string, []string) tea.Cmd) tuiModel {
 	sp := spinner.New(
 		spinner.WithSpinner(spinner.MiniDot),
 		spinner.WithStyle(styles.spinner),
@@ -166,6 +189,7 @@ func newTUIModel(cfg Config, env *SwarmEnv, styles tuiStyles, execAgy func(strin
 	ti.Width = 64
 
 	setupCtx, cancelSetup := context.WithCancel(context.Background())
+	agyCtx, cancelAgy := context.WithCancel(context.Background())
 
 	stage := stageCreateGateway
 	inFlightSetup := true
@@ -186,7 +210,10 @@ func newTUIModel(cfg Config, env *SwarmEnv, styles tuiStyles, execAgy func(strin
 		cancelSetup:   cancelSetup,
 		setupDeadline: time.Now().Add(cfg.SetupTimeout),
 		inFlightSetup: inFlightSetup,
-		execAgy:       execAgy,
+		startAgy:      starter,
+		agyCtx:        agyCtx,
+		cancelAgy:     cancelAgy,
+		agyModel:      cfg.Model,
 	}
 }
 
@@ -211,7 +238,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
-		if m.stage == stageCreateGateway || m.stage == stageCreateWorkspace || m.stage == stageWaitWorkspace || m.stage == stageCleanup {
+		switch m.stage {
+		case stageCreateGateway, stageCreateWorkspace, stageWaitWorkspace, stageStartingAgy, stageRunningAgy, stageCleanup:
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd
@@ -225,6 +253,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case tea.KeyCtrlC, tea.KeyEsc:
 				m.cancelled = true
 				m.cancelSetup()
+				m.cancelAgy()
 				m.stage = stageDone
 				return m, tea.Quit
 			case tea.KeyEnter:
@@ -259,15 +288,23 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
+
+		case stageStartingAgy, stageRunningAgy:
+			if msg.Type == tea.KeyCtrlC {
+				if m.cancelled {
+					// Second Ctrl+C forces immediate exit; runTUI still runs cleanup.
+					return m, tea.Quit
+				}
+				m.cancelled = true
+				m.cancelAgy()
+				return m, nil
+			}
 		}
 		return m, nil
 
 	case gatewayCreatedMsg:
 		m.inFlightSetup = false
 		if m.cancelled {
-			if msg.err == nil {
-				m.env.GatewayCreated = true
-			}
 			return m.startCleanupOrQuit()
 		}
 		if msg.err != nil {
@@ -275,7 +312,6 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.steps = append(m.steps, stepEntry{kind: stepErr, text: "Failed to create Gateway " + m.cfg.Name})
 			return m.startCleanupOrQuit()
 		}
-		m.env.GatewayCreated = true
 		m.steps = append(m.steps, stepEntry{kind: stepOK, text: "Created Gateway " + m.cfg.Name})
 		m.stage = stageCreateWorkspace
 		m.inFlightSetup = true
@@ -284,9 +320,6 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case workspaceCreatedMsg:
 		m.inFlightSetup = false
 		if m.cancelled {
-			if msg.err == nil {
-				m.env.WorkspaceCreated = true
-			}
 			return m.startCleanupOrQuit()
 		}
 		if msg.err != nil {
@@ -294,7 +327,6 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.steps = append(m.steps, stepEntry{kind: stepErr, text: "Failed to create Workspace " + m.cfg.Name})
 			return m.startCleanupOrQuit()
 		}
-		m.env.WorkspaceCreated = true
 		m.steps = append(m.steps, stepEntry{kind: stepOK, text: "Created Workspace " + m.cfg.Name})
 		m.workspaceWaitStart = time.Now()
 		m.workspacePhase = "pending"
@@ -315,11 +347,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.phase == "Ready" {
 			elapsed := formatElapsed(time.Since(m.workspaceWaitStart))
 			m.steps = append(m.steps, stepEntry{kind: stepOK, text: fmt.Sprintf("Workspace %s ready (%s)", m.cfg.Name, elapsed)})
-			m.stage = stageRunningAgy
+			m.stage = stageStartingAgy
 			m.agyStart = time.Now()
-			prompt := BuildSwarmPrompt(m.cfg, m.env.AX.BaseCommandLine())
-			agyArgs := BuildAgyArgs(m.cfg, prompt)
-			return m, m.execAgy(m.cfg.AgyBin, agyArgs)
+			return m, m.startAgyCmd()
 		}
 		label := msg.phase
 		if label == "" {
@@ -355,43 +385,119 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.inFlightSetup = true
 		return m, m.pollWorkspaceCmd()
 
-	case agyExitedMsg:
-		m.agyErr = msg.err
-		elapsed := formatElapsed(time.Since(m.agyStart))
+	case agyStartedMsg:
 		if msg.err != nil {
-			var exitErr *exec.ExitError
-			if errors.As(msg.err, &exitErr) {
-				m.steps = append(m.steps, stepEntry{
-					kind: stepWarn,
-					text: fmt.Sprintf("agy /swarm exited with status %d (%s)", exitErr.ExitCode(), elapsed),
-				})
-			} else {
-				m.steps = append(m.steps, stepEntry{
-					kind: stepErr,
-					text: fmt.Sprintf("agy /swarm failed (%s)", elapsed),
-				})
-			}
-		} else {
-			m.steps = append(m.steps, stepEntry{
-				kind: stepOK,
-				text: fmt.Sprintf("agy /swarm session finished (%s)", elapsed),
-			})
+			m.agyErr = msg.err
+			return m.startCleanupOrQuit()
 		}
-		return m.startCleanupOrQuit()
+		m.agyCh = msg.ch
+		m.agyRan = true
+		m.stage = stageRunningAgy
+		return m, tea.Batch(waitAgyEventCmd(m.agyCh), m.scheduleTaskPollCmd())
+
+	case agyStreamMsg:
+		if m.stage != stageRunningAgy {
+			return m, nil
+		}
+		if !msg.ok || msg.ev.Kind == AgyEventDone {
+			var flushCmds []tea.Cmd
+			if m.lineBuf != "" {
+				flushCmds = append(flushCmds, tea.Println(m.lineBuf))
+				m.lineBuf = ""
+			}
+			if m.finalResponse != "" && strings.TrimSpace(m.streamedOutput) == "" {
+				trimmed := strings.TrimRight(m.finalResponse, "\n")
+				m.streamedOutput = m.finalResponse
+				if trimmed != "" {
+					flushCmds = append(flushCmds, tea.Println(trimmed))
+				}
+			}
+			if msg.ok && msg.ev.Err != nil {
+				m.agyErr = msg.ev.Err
+			} else if m.agyResultErr != nil {
+				m.agyErr = m.agyResultErr
+			}
+			nextModel, nextCmd := m.startCleanupOrQuit()
+			if len(flushCmds) > 0 {
+				cmds := append(flushCmds, nextCmd)
+				return nextModel, tea.Sequence(cmds...)
+			}
+			return nextModel, nextCmd
+		}
+
+		var cmds []tea.Cmd
+		switch msg.ev.Kind {
+		case AgyEventInit:
+			if msg.ev.Model != "" {
+				m.agyModel = msg.ev.Model
+			}
+		case AgyEventTool:
+			if msg.ev.ToolState == "ACTIVE" {
+				m.agyActiveTool = msg.ev.ToolName
+			} else {
+				m.agyActiveTool = ""
+			}
+		case AgyEventText:
+			m.agyActiveTool = ""
+			m.streamedOutput += msg.ev.Text
+			m.lineBuf += msg.ev.Text
+			if idx := strings.LastIndex(m.lineBuf, "\n"); idx >= 0 {
+				ready := m.lineBuf[:idx]
+				m.lineBuf = m.lineBuf[idx+1:]
+				cmds = append(cmds, tea.Println(ready))
+			}
+		case AgyEventResult:
+			if msg.ev.Response != "" {
+				m.finalResponse = msg.ev.Response
+			}
+			if msg.ev.Status == "ERROR" || msg.ev.ErrorText != "" {
+				errMsg := msg.ev.ErrorText
+				if errMsg == "" {
+					errMsg = "agy returned status " + msg.ev.Status
+				}
+				m.agyResultErr = errors.New(errMsg)
+			}
+		case AgyEventStderr:
+			if len(m.agyStderr) < 20 {
+				m.agyStderr = append(m.agyStderr, msg.ev.ErrorText)
+			}
+		}
+
+		cmds = append(cmds, waitAgyEventCmd(m.agyCh))
+		return m, tea.Batch(cmds...)
+
+	case taskPollTickMsg:
+		if m.stage != stageRunningAgy || m.cancelled {
+			return m, nil
+		}
+		return m, m.pollTaskCountsCmd()
+
+	case taskCountsMsg:
+		if m.stage != stageRunningAgy {
+			return m, nil
+		}
+		if msg.err == nil {
+			m.runningTasks = msg.running
+			m.totalTasks = msg.total
+		}
+		return m, m.scheduleTaskPollCmd()
 
 	case cleanupDoneMsg:
 		m.cleanupRan = true
+		var entry stepEntry
 		if msg.res.Err != nil {
-			m.steps = append(m.steps, stepEntry{
+			entry = stepEntry{
 				kind: stepWarn,
 				text: fmt.Sprintf("Cleanup warnings for %s*: %v", m.cfg.Name, msg.res.Err),
-			})
+			}
 		} else {
-			m.steps = append(m.steps, stepEntry{
+			entry = stepEntry{
 				kind: stepOK,
 				text: capitalizeFirst(msg.res.Summary(m.cfg.Name)),
-			})
+			}
 		}
+		m.finalStep = &entry
+		m.steps = append(m.steps, entry)
 		m.stage = stageDone
 		return m, tea.Quit
 	}
@@ -403,10 +509,12 @@ func (m tuiModel) startCleanupOrQuit() (tea.Model, tea.Cmd) {
 	if m.cfg.Keep {
 		m.cleanupRan = true
 		if m.env.GatewayCreated || m.env.WorkspaceCreated {
-			m.steps = append(m.steps, stepEntry{
+			entry := stepEntry{
 				kind: stepInfo,
 				text: fmt.Sprintf("Kept AX resources named %s*", m.cfg.Name),
-			})
+			}
+			m.finalStep = &entry
+			m.steps = append(m.steps, entry)
 		}
 		m.stage = stageDone
 		return m, tea.Quit
@@ -449,6 +557,48 @@ func (m tuiModel) pollWorkspaceCmd() tea.Cmd {
 	}
 }
 
+func (m tuiModel) startAgyCmd() tea.Cmd {
+	ctx := m.agyCtx
+	starter := m.startAgy
+	cfg := m.cfg
+	axBase := m.env.AX.BaseCommandLine()
+	return func() tea.Msg {
+		prompt := BuildSwarmPrompt(cfg, axBase)
+		args := BuildAgyArgs(cfg, prompt)
+		ch, err := starter(ctx, cfg.AgyBin, args)
+		return agyStartedMsg{ch: ch, err: err}
+	}
+}
+
+func waitAgyEventCmd(ch <-chan AgyEvent) tea.Cmd {
+	return func() tea.Msg {
+		ev, ok := <-ch
+		return agyStreamMsg{ev: ev, ok: ok}
+	}
+}
+
+func (m tuiModel) scheduleTaskPollCmd() tea.Cmd {
+	interval := m.env.AX.PollInterval
+	if interval <= 0 {
+		interval = 500 * time.Millisecond
+	}
+	if interval < 2*time.Second {
+		interval = 2 * time.Second
+	}
+	return tea.Tick(interval, func(time.Time) tea.Msg {
+		return taskPollTickMsg{}
+	})
+}
+
+func (m tuiModel) pollTaskCountsCmd() tea.Cmd {
+	ctx := m.agyCtx
+	env := m.env
+	return func() tea.Msg {
+		running, total, err := env.AX.ListTaskCountsWithPrefix(ctx, env.Name+"-")
+		return taskCountsMsg{running: running, total: total, err: err}
+	}
+}
+
 func (m tuiModel) cleanupCmd() tea.Cmd {
 	env := m.env
 	return func() tea.Msg {
@@ -458,10 +608,46 @@ func (m tuiModel) cleanupCmd() tea.Cmd {
 	}
 }
 
+func (m tuiModel) outputText() string {
+	if strings.TrimSpace(m.streamedOutput) != "" {
+		return m.streamedOutput
+	}
+	return m.finalResponse
+}
+
 func (m tuiModel) View() string {
+	// Once agy is running in the background, keep the view focused cleanly on
+	// agy's streamed output with only a minimal status line underneath.
+	if m.stage == stageRunningAgy {
+		var b strings.Builder
+		if m.lineBuf != "" {
+			b.WriteString(m.lineBuf + "\n")
+		}
+		status := m.runningStatusText()
+		b.WriteString(fmt.Sprintf("%s %s\n", m.spinner.View(), m.styles.dim.Render(status)))
+		return b.String()
+	}
+
+	if m.agyRan && (m.stage == stageCleanup || m.stage == stageDone) {
+		var b strings.Builder
+		if m.stage == stageCleanup {
+			b.WriteString(fmt.Sprintf("%s %s\n", m.spinner.View(), m.styles.dim.Render(fmt.Sprintf("cleaning up %s*...", m.cfg.Name))))
+			return b.String()
+		}
+		if m.finalStep != nil {
+			b.WriteString(m.renderStep(*m.finalStep) + "\n")
+		}
+		if m.cancelled {
+			b.WriteString(m.styles.warnIcon.Render("Canceled.") + "\n")
+		} else if m.agyErr != nil {
+			b.WriteString(m.styles.errBox.Render("Error: "+m.formatAgyError()) + "\n")
+		}
+		return b.String()
+	}
+
 	var b strings.Builder
 
-	// Header bar
+	// Header bar (shown during goal input and AX setup)
 	b.WriteString("\n")
 	header := fmt.Sprintf("  %s  %s  %s  %s",
 		m.styles.badge.Render("ax-swarm"),
@@ -497,18 +683,7 @@ func (m tuiModel) View() string {
 	}
 
 	for _, st := range m.steps {
-		var icon string
-		switch st.kind {
-		case stepOK:
-			icon = m.styles.okIcon.Render("✓")
-		case stepInfo:
-			icon = m.styles.infoIcon.Render("○")
-		case stepWarn:
-			icon = m.styles.warnIcon.Render("!")
-		case stepErr:
-			icon = m.styles.errIcon.Render("✗")
-		}
-		b.WriteString(fmt.Sprintf("  %s %s\n", icon, st.text))
+		b.WriteString("  " + m.renderStep(st) + "\n")
 	}
 
 	switch m.stage {
@@ -541,8 +716,12 @@ func (m tuiModel) View() string {
 		b.WriteString(fmt.Sprintf("  %s %s\n", m.spinner.View(), m.styles.active.Render(label)))
 		b.WriteString("\n  " + m.styles.dim.Render("ctrl+c cancel") + "\n")
 
-	case stageRunningAgy:
-		b.WriteString(fmt.Sprintf("  %s %s\n", m.styles.swarmName.Render("▶"), m.styles.active.Render("Launching interactive agy /swarm...")))
+	case stageStartingAgy:
+		label := "Starting agy /swarm in background..."
+		if m.cancelled {
+			label = "Canceling..."
+		}
+		b.WriteString(fmt.Sprintf("  %s %s\n", m.spinner.View(), m.styles.active.Render(label)))
 
 	case stageCleanup:
 		b.WriteString(fmt.Sprintf("  %s %s\n", m.spinner.View(), m.styles.active.Render(fmt.Sprintf("Cleaning up AX resources (%s*)...", m.cfg.Name))))
@@ -553,15 +732,59 @@ func (m tuiModel) View() string {
 		} else if m.err != nil {
 			b.WriteString("\n  " + m.styles.errBox.Render("Error: "+m.err.Error()) + "\n")
 		} else if m.agyErr != nil {
-			var exitErr *exec.ExitError
-			if !errors.As(m.agyErr, &exitErr) {
-				b.WriteString("\n  " + m.styles.errBox.Render("Error: "+m.agyErr.Error()) + "\n")
-			}
+			b.WriteString("\n  " + m.styles.errBox.Render("Error: "+m.formatAgyError()) + "\n")
 		}
 	}
 
 	b.WriteString("\n")
 	return b.String()
+}
+
+func (m tuiModel) renderStep(st stepEntry) string {
+	var icon string
+	switch st.kind {
+	case stepOK:
+		icon = m.styles.okIcon.Render("✓")
+	case stepInfo:
+		icon = m.styles.infoIcon.Render("○")
+	case stepWarn:
+		icon = m.styles.warnIcon.Render("!")
+	case stepErr:
+		icon = m.styles.errIcon.Render("✗")
+	}
+	return fmt.Sprintf("%s %s", icon, st.text)
+}
+
+func (m tuiModel) runningStatusText() string {
+	if m.cancelled {
+		return "canceling agy /swarm..."
+	}
+	parts := []string{m.cfg.Name}
+	if m.agyModel != "" {
+		parts = append(parts, m.agyModel)
+	}
+	if m.totalTasks > 0 {
+		if m.runningTasks == m.totalTasks {
+			parts = append(parts, fmt.Sprintf("%d AX tasks running", m.runningTasks))
+		} else {
+			parts = append(parts, fmt.Sprintf("%d/%d AX tasks running", m.runningTasks, m.totalTasks))
+		}
+	}
+	if m.agyActiveTool != "" {
+		parts = append(parts, m.agyActiveTool)
+	}
+	parts = append(parts, formatElapsed(time.Since(m.agyStart)))
+	return strings.Join(parts, " · ") + "  (ctrl+c cancel)"
+}
+
+func (m tuiModel) formatAgyError() string {
+	if m.agyErr == nil {
+		return ""
+	}
+	if len(m.agyStderr) > 0 {
+		return fmt.Sprintf("%v (%s)", m.agyErr, m.agyStderr[len(m.agyStderr)-1])
+	}
+	return m.agyErr.Error()
 }
 
 func formatElapsed(d time.Duration) string {
@@ -579,10 +802,11 @@ func capitalizeFirst(s string) string {
 	return strings.ToUpper(s[:1]) + s[1:]
 }
 
-func runTUI(cfg Config, env *SwarmEnv, stdin io.Reader, stdout, stderr io.Writer, colorEnabled bool) int {
+func runTUI(cfg Config, env *SwarmEnv, stdin io.Reader, stdout, stderr io.Writer, stdoutTTY, colorEnabled bool) int {
 	styles := newTUIStyles(stderr, cfg.Color, colorEnabled)
-	model := newTUIModel(cfg, env, styles, defaultExecAgy(stdin, stdout, stderr))
+	model := newTUIModel(cfg, env, styles, StartAgyStream)
 	defer model.cancelSetup()
+	defer model.cancelAgy()
 
 	p := tea.NewProgram(model, tea.WithInput(stdin), tea.WithOutput(stderr))
 	finalModel, err := p.Run()
@@ -606,6 +830,18 @@ func runTUI(cfg Config, env *SwarmEnv, stdin io.Reader, stdout, stderr io.Writer
 		defer cancel()
 		env.CleanupWithResult(ctx)
 	}
+
+	// If stdout is redirected/piped (not a TTY), write agy's output cleanly to
+	// stdout while the TUI rendered live progress and output on stderr.
+	if !stdoutTTY {
+		if out := final.outputText(); out != "" {
+			if !strings.HasSuffix(out, "\n") {
+				out += "\n"
+			}
+			_, _ = io.WriteString(stdout, out)
+		}
+	}
+
 	if final.cancelled || final.err != nil {
 		return 1
 	}
