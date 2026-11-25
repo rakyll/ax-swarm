@@ -4,6 +4,10 @@ Run an [AX](https://github.com/google/ax) workspace swarm driven by Antigravity 
 
 `ax-swarm` provisions **one shared AX `Gateway` and one shared AX `Workspace` per swarm**, runs `agy /swarm` in the background while streaming only its outputs, and cleans up all `<swarm-name>-*` tasks plus the Workspace and Gateway when done.
 
+![ax-swarm demo](assets/demo.gif)
+
+<sub>A real run against a local AX cluster, played back 6× faster. Regenerate with `vhs assets/demo.tape`.</sub>
+
 ## How It Works
 
 1. **Setup**: Creates one AX `Gateway` and one AX `Workspace` for the swarm, clones any `--repo` URLs, runs any `--setup-cmd` commands, and waits until the Workspace is ready.
