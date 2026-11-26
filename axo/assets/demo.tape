@@ -4,6 +4,11 @@
 #
 #   (cd axo && make install) && vhs axo/assets/demo.tape
 #
+# The raw recording of this multi-minute run is large (~18 MB), so shrink it
+# for the README afterwards (2x faster, 5 fps, 1120 px wide, 64 colors):
+#
+#   ffmpeg -i axo/assets/demo.gif -vf "setpts=0.5*PTS,fps=5,scale=1120:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=64[p];[b][p]paletteuse=dither=none:diff_mode=rectangle" /tmp/demo.gif && mv /tmp/demo.gif axo/assets/demo.gif
+#
 # Requires axo, ax, and agy on PATH and a running AX cluster.
 
 Output axo/assets/demo.gif
