@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Command ax-o is a custom AX task orchestrator built on plain
+// Command axo is a custom AX task orchestrator built on plain
 // `agy -p` calls (it never uses agy's /swarm mode). It provisions exactly one
 // AX Gateway and one AX Workspace, asks agy to plan the goal as a dependency
 // graph of tasks, runs every task inside its own AX Task (all sharing the one
@@ -43,7 +43,7 @@ import (
 	"time"
 )
 
-const progName = "ax-o"
+const progName = "axo"
 
 var (
 	runNameRe     = regexp.MustCompile(`^[a-z]([-a-z0-9]*[a-z0-9])?$`)
@@ -213,11 +213,11 @@ func agyMissingMessage(bin string) string {
 		"Docs: https://antigravity.google/docs/getting-started"
 }
 
-// resourcePrefix starts the name of every AX resource ax-o creates: the
+// resourcePrefix starts the name of every AX resource axo creates: the
 // Gateway, the Workspace, and all Tasks.
-const resourcePrefix = "ax-o-"
+const resourcePrefix = "axo-"
 
-// withResourcePrefix prefixes a run name with "ax-o-" unless it already has it.
+// withResourcePrefix prefixes a run name with "axo-" unless it already has it.
 func withResourcePrefix(name string) string {
 	if strings.HasPrefix(name, resourcePrefix) {
 		return name
@@ -269,7 +269,7 @@ Environment:
 	fs.StringVar(&cfg.Atespace, "atespace", "default", "AX atespace name")
 	fs.StringVar(&cfg.KubeContext, "context", "", "kubeconfig context (default: active context)")
 	fs.StringVar(&cfg.Server, "server", strings.TrimSpace(os.Getenv("AX_SERVER")), "AX control plane (ax-server) address (default: $AX_SERVER, else a port-forward in the kubeconfig context)")
-	fs.StringVar(&cfg.Name, "name", "", "run name; AX resources are named ax-o-<name>, ax-o-<name>-<task> (default: random)")
+	fs.StringVar(&cfg.Name, "name", "", "run name; AX resources are named axo-<name>, axo-<name>-<task> (default: random)")
 	fs.IntVar(&cfg.Parallel, "parallel", 4, "max concurrent AX Tasks (and agy workers)")
 	fs.IntVar(&cfg.MaxRounds, "max-rounds", 3, "max plan/execute/review rounds before synthesizing the answer")
 	fs.IntVar(&cfg.MaxRetries, "max-retries", 1, "retries for a task whose worker fails (0-5)")
@@ -568,7 +568,7 @@ func run(args []string, stdin *os.File, stdout, stderr *os.File) int {
 
 func runDryRun(cfg Config, ui *UI, stdout, stderr io.Writer) int {
 	if cfg.Goal == "" {
-		prompt := fmt.Sprintf("%s %s ", ui.Paint("?", ansiBold, ansiCyan), ui.Paint("What should ax-o do?", ansiBold))
+		prompt := fmt.Sprintf("%s %s ", ui.Paint("?", ansiBold, ansiCyan), ui.Paint("What should axo do?", ansiBold))
 		answer, ok, err := ui.Ask(prompt)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", ui.Paint(progName+": "+err.Error(), ansiRed))
@@ -607,7 +607,7 @@ func runHeadless(cfg Config, env *Env, stdin io.Reader, stdout, stderr io.Writer
 	}
 	ui := newUI(stderr, stdin, color, false)
 	if cfg.Goal == "" {
-		prompt := fmt.Sprintf("%s %s ", ui.Paint("?", ansiBold, ansiCyan), ui.Paint("What should ax-o do?", ansiBold))
+		prompt := fmt.Sprintf("%s %s ", ui.Paint("?", ansiBold, ansiCyan), ui.Paint("What should axo do?", ansiBold))
 		answer, ok, err := ui.Ask(prompt)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", ui.Paint(progName+": "+err.Error(), ansiRed))
@@ -626,7 +626,7 @@ func runHeadless(cfg Config, env *Env, stdin io.Reader, stdout, stderr io.Writer
 	}()
 
 	ui.Log(fmt.Sprintf("%s: setting up one AX Gateway and one AX Workspace in atespace %s",
-		ui.Paint("ax-o "+cfg.Name, ansiBold, ansiCyan), ui.Paint(cfg.Atespace, ansiBold)))
+		ui.Paint("axo "+cfg.Name, ansiBold, ansiCyan), ui.Paint(cfg.Atespace, ansiBold)))
 
 	runCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()

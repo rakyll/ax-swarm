@@ -37,7 +37,7 @@ import (
 const maxAXStepLen = 24
 
 // AX drives the AX control plane (the ax-server gRPC API) for one atespace.
-// ax-o never shells out to the ax CLI for lifecycle operations: Gateways,
+// axo never shells out to the ax CLI for lifecycle operations: Gateways,
 // Workspaces, and Tasks are created, watched, resumed, and deleted with RPCs.
 type AX struct {
 	Client   v1alpha1.AXClient
@@ -118,7 +118,7 @@ func rpcError(op string, err error) error {
 	return fmt.Errorf("%s: %w", op, err)
 }
 
-// errAlreadyExists reports a create that hit an existing resource. ax-o
+// errAlreadyExists reports a create that hit an existing resource. axo
 // never adopts (or later deletes) a Gateway or Workspace it did not create.
 var errAlreadyExists = errors.New("already exists")
 

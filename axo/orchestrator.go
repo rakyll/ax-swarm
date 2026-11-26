@@ -922,7 +922,7 @@ func axErrorHint(msg, name string) string {
 		return fmt.Sprintf("AX failed to set up the Workspace. Rerun with --keep to inspect it with "+
 			"`ax describe workspace %s`.", name)
 	case strings.Contains(lower, "unimplemented") || strings.Contains(lower, "not supported yet"):
-		return "The AX server does not support part of the request (version skew between ax-o's AX API, the workers' ax CLI, and the server). " +
+		return "The AX server does not support part of the request (version skew between axo's AX API, the workers' ax CLI, and the server). " +
 			"Point --ax-bin (or AX_BIN) at an ax binary built from the same AX version as the cluster."
 	}
 	return ""

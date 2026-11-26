@@ -110,7 +110,7 @@ func testConfig() Config {
 		Goal:          "Audit the repo",
 		Image:         "localhost:5001/ax-runner@sha256:" + strings.Repeat("a", 64),
 		Atespace:      "default",
-		Name:          "ax-o-test",
+		Name:          "axo-test",
 		Parallel:      2,
 		MaxRounds:     2,
 		MaxRetries:    1,
@@ -178,7 +178,7 @@ func TestOrchestratorSingleGatewayAndWorkspace(t *testing.T) {
 
 	// c depends on a and b, so its worker must see both reports.
 	cPrompt := fagy.workerPrompts["c"][0]
-	for _, want := range []string{"Task `a`", "Task `b`", "evidence for a", "ssh ax-o-test-c"} {
+	for _, want := range []string{"Task `a`", "Task `b`", "evidence for a", "ssh axo-test-c"} {
 		if !strings.Contains(cPrompt, want) {
 			t.Errorf("worker prompt for c missing %q", want)
 		}
@@ -245,7 +245,7 @@ func TestOrchestratorRetriesAndSkipsDependents(t *testing.T) {
 	if n := len(fagy.workerPrompts["a"]); n != 2 {
 		t.Errorf("a attempts = %d, want 2", n)
 	}
-	if !strings.Contains(fagy.workerPrompts["a"][1], "worker crashed") || !strings.Contains(fagy.workerPrompts["a"][1], "ssh ax-o-test-a-r2") {
+	if !strings.Contains(fagy.workerPrompts["a"][1], "worker crashed") || !strings.Contains(fagy.workerPrompts["a"][1], "ssh axo-test-a-r2") {
 		t.Errorf("retry prompt lacks previous error or retry task name")
 	}
 	if _, ok := fagy.workerPrompts["c"]; ok {
@@ -400,7 +400,7 @@ func TestPromptsNeverUseSwarm(t *testing.T) {
 	reports := []TaskReport{{ID: "a", Title: "A", Goal: "g", Status: StatusDone, Summary: "s"}}
 	prompts := map[string]string{
 		"planner":  BuildPlannerPrompt(cfg),
-		"worker":   BuildWorkerPrompt(cfg, "ax -a default", WorkerTask{ID: "a", Title: "A", Goal: "g", AXName: "ax-o-test-a", Attempt: 1}, reports),
+		"worker":   BuildWorkerPrompt(cfg, "ax -a default", WorkerTask{ID: "a", Title: "A", Goal: "g", AXName: "axo-test-a", Attempt: 1}, reports),
 		"reviewer": BuildReviewerPrompt(cfg, reports, 1, 5),
 		"synth":    BuildSynthesisPrompt(cfg, reports),
 	}
@@ -432,12 +432,12 @@ func TestRunHeadless(t *testing.T) {
 		t.Errorf("stdout = %q", stdout.String())
 	}
 	log := stderr.String()
-	for _, want := range []string{"Created Gateway ax-o-test", "Created Workspace ax-o-test", "task c done"} {
+	for _, want := range []string{"Created Gateway axo-test", "Created Workspace axo-test", "task c done"} {
 		if !strings.Contains(log, want) {
 			t.Errorf("stderr missing %q:\n%s", want, log)
 		}
 	}
-	if !strings.Contains(log, "deleted Workspace and Gateway (ax-o-test*)") {
+	if !strings.Contains(log, "deleted Workspace and Gateway (axo-test*)") {
 		t.Errorf("stderr missing cleanup summary:\n%s", log)
 	}
 	if len(fax.gateways) != 0 || len(fax.workspaces) != 0 {
@@ -455,17 +455,17 @@ func TestTUIModelRendersTasks(t *testing.T) {
 		next, _ := m.Update(orchEventMsg{ev: ev, ok: true})
 		m = next.(tuiModel)
 	}
-	step(Event{Kind: EvStep, Level: LevelOK, Text: "Created Gateway ax-o-test"})
-	if v := m.View(); !strings.Contains(v, progName) || !strings.Contains(v, "Created Gateway ax-o-test") {
+	step(Event{Kind: EvStep, Level: LevelOK, Text: "Created Gateway axo-test"})
+	if v := m.View(); !strings.Contains(v, progName) || !strings.Contains(v, "Created Gateway axo-test") {
 		t.Fatalf("setup view:\n%s", v)
 	}
 	step(Event{Kind: EvSetupDone})
 	step(Event{Kind: EvTasks, Tasks: []TaskSnapshot{
-		{ID: "a", Status: StatusRunning, AXName: "ax-o-test-a", Since: time.Now(), Activity: "ax ssh"},
+		{ID: "a", Status: StatusRunning, AXName: "axo-test-a", Since: time.Now(), Activity: "ax ssh"},
 		{ID: "b", Status: StatusPending, Since: time.Now()},
 	}})
 	v := m.View()
-	for _, want := range []string{"TASK", "AX TASK", "ax-o-test-a", "running", "pending"} {
+	for _, want := range []string{"TASK", "AX TASK", "axo-test-a", "running", "pending"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("running view missing %q:\n%s", want, v)
 		}
@@ -477,10 +477,10 @@ func TestTUIModelRendersTasks(t *testing.T) {
 
 func TestValidateConfigResourcePrefix(t *testing.T) {
 	for _, tc := range []struct{ in, want string }{
-		{"audit", "ax-o-audit"},
-		{"ax-o-audit", "ax-o-audit"},
-		{"2026-run", "ax-o-2026-run"},
-		{strings.Repeat("a", 33), "ax-o-" + strings.Repeat("a", 33)},
+		{"audit", "axo-audit"},
+		{"axo-audit", "axo-audit"},
+		{"2026-run", "axo-2026-run"},
+		{strings.Repeat("a", 34), "axo-" + strings.Repeat("a", 34)},
 	} {
 		cfg := testConfig()
 		cfg.Name = tc.in
@@ -494,10 +494,10 @@ func TestValidateConfigResourcePrefix(t *testing.T) {
 	}
 	cfg := testConfig()
 	cfg.Name = ""
-	if err := validateConfig(&cfg, "/nonexistent"); err != nil || !regexp.MustCompile(`^ax-o-[0-9a-f]{6}$`).MatchString(cfg.Name) {
-		t.Errorf("random name = %q (err %v), want ax-o-<hex>", cfg.Name, err)
+	if err := validateConfig(&cfg, "/nonexistent"); err != nil || !regexp.MustCompile(`^axo-[0-9a-f]{6}$`).MatchString(cfg.Name) {
+		t.Errorf("random name = %q (err %v), want axo-<hex>", cfg.Name, err)
 	}
-	for _, bad := range []string{strings.Repeat("a", 34), "Bad_Name", "trailing-"} {
+	for _, bad := range []string{strings.Repeat("a", 35), "Bad_Name", "trailing-"} {
 		cfg := testConfig()
 		cfg.Name = bad
 		if err := validateConfig(&cfg, "/nonexistent"); err == nil {

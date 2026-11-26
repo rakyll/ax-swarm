@@ -148,7 +148,7 @@ func newTUIModel(cfg Config, env *Env, styles tuiStyles, starter orchStarter) tu
 	}
 	sp := spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(styles.spinner))
 	ti := textinput.New()
-	ti.Placeholder = "Describe the goal for ax-o..."
+	ti.Placeholder = "Describe the goal for axo..."
 	ti.Prompt = "❯ "
 	ti.PromptStyle = styles.runName
 	ti.CharLimit = 4096
@@ -236,7 +236,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case tea.KeyEnter:
 				goal := strings.TrimSpace(m.input.Value())
 				if goal == "" {
-					m.inputErr = "Enter a goal to start ax-o."
+					m.inputErr = "Enter a goal to start axo."
 					return m, nil
 				}
 				m.cfg.Goal = goal
@@ -454,7 +454,7 @@ func (m tuiModel) View() string {
 	b.WriteString("\n")
 
 	if m.stage == stageGoalInput {
-		b.WriteString("  " + m.styles.prompt.Render("What should ax-o do?") + "\n")
+		b.WriteString("  " + m.styles.prompt.Render("What should axo do?") + "\n")
 		b.WriteString("  " + m.input.View() + "\n")
 		if m.inputErr != "" {
 			b.WriteString("  " + m.styles.errBox.Render(m.inputErr) + "\n")
@@ -658,7 +658,7 @@ func (m tuiModel) renderAXCheckSummary() string {
 
 func (m tuiModel) renderRunningStatusLine() string {
 	if m.cancelled {
-		return m.styles.warnIcon.Render("canceling ax-o...")
+		return m.styles.warnIcon.Render("canceling axo...")
 	}
 	parts := []string{m.styles.runName.Render(m.cfg.Name)}
 	if m.cfg.Model != "" {
@@ -675,9 +675,9 @@ func (m tuiModel) completionLine() string {
 	elapsed := formatElapsed(time.Since(m.runStart))
 	switch {
 	case m.cancelled:
-		return m.styles.warnIcon.Render("×") + " ax-o canceled after " + elapsed
+		return m.styles.warnIcon.Render("×") + " axo canceled after " + elapsed
 	case m.runErr != nil:
-		return m.styles.errIcon.Render("✗") + " ax-o finished with an error after " + elapsed
+		return m.styles.errIcon.Render("✗") + " axo finished with an error after " + elapsed
 	default:
 		var done, total int
 		for _, t := range m.tasks {
@@ -686,7 +686,7 @@ func (m tuiModel) completionLine() string {
 				done++
 			}
 		}
-		return m.styles.okIcon.Render("✓") + " ax-o finished in " + elapsed +
+		return m.styles.okIcon.Render("✓") + " axo finished in " + elapsed +
 			m.styles.subtle.Render(fmt.Sprintf(" (%d/%d tasks done)", done, total))
 	}
 }
