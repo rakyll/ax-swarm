@@ -39,7 +39,7 @@ Show
 
 Type `axo --workspace '{"setup":{"git":[{"repo":"https://github.com/chalk/chalk"}]}}' \`
 Enter
-Type `  "Why would I use this library, and what are its weak spots?"`
+Type `  "Why would I use this library, is it any good, any alternatives?"`
 Sleep 500ms
 Enter
 

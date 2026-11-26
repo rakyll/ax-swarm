@@ -12,7 +12,7 @@ axo is a task orchestrator for [AX](https://github.com/google/ax) driven by plai
 go install github.com/rakyll/axo@latest   # or `make install` from a clone
 
 axo --workspace '{"setup":{"git":[{"repo":"https://github.com/chalk/chalk"}]}}' \
-  "Why would I use this library, and what are its weak spots?"
+  "Why would I use this library, is it any good, any alternatives?"
 ```
 
 Leave off the goal to type it in the TUI. Add `--dry-run` to preview everything without creating anything.
