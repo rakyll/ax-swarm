@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -230,6 +231,7 @@ func (o *Orchestrator) currentRound() *SpanRef {
 
 func (o *Orchestrator) step(level LogLevel, text string) {
 	o.emit(Event{Kind: EvStep, Level: level, Text: text})
+	o.root.Event(levelName(level), text)
 }
 
 func (o *Orchestrator) status(text string) {
@@ -591,7 +593,40 @@ func (o *Orchestrator) addTasks(planned []plannedTaskJ, round, limit int) int {
 		o.log(LevelOK, "+", l)
 	}
 	o.emitTasks()
+	o.publishGraph()
 	return added
+}
+
+// graphNode is one planned task in the trace's task graph.
+type graphNode struct {
+	ID        string   `json:"id"`
+	Title     string   `json:"title"`
+	Goal      string   `json:"goal"`
+	DependsOn []string `json:"depends_on"`
+	Round     int      `json:"round"`
+}
+
+// publishGraph records every planned task (including ones not started yet)
+// as the run span's "graph" attribute, so the trace viewer can draw the full
+// task graph live.
+func (o *Orchestrator) publishGraph() {
+	if o.Trace == nil {
+		return
+	}
+	o.mu.Lock()
+	nodes := make([]graphNode, 0, len(o.order))
+	for _, id := range o.order {
+		t := o.tasks[id]
+		deps := t.DependsOn
+		if deps == nil {
+			deps = []string{}
+		}
+		nodes = append(nodes, graphNode{ID: t.ID, Title: t.Title, Goal: truncate(t.Goal, 2000), DependsOn: deps, Round: t.Round})
+	}
+	o.mu.Unlock()
+	if data, err := json.Marshal(nodes); err == nil {
+		o.root.SetAttr("graph", string(data))
+	}
 }
 
 func (o *Orchestrator) snapshotLocked() []TaskSnapshot {

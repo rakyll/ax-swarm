@@ -27,7 +27,7 @@ The server is located the same way `ax` finds it: `--server` / `$AX_SERVER` if s
 ```mermaid
 flowchart LR
   S["Setup: 1 Gateway + 1 Workspace"] --> P["Plan (agy, JSON schema)"]
-  P --> E["Execute task DAG<br/>one AX Task + agy worker per task<br/>up to --parallel at once"]
+  P --> E["Execute task graph<br/>one AX Task + agy worker per task<br/>up to --parallel at once"]
   E --> R{"Review (agy, JSON schema)"}
   R -- "follow-up tasks" --> E
   R -- complete / --max-rounds --> Y["Synthesize answer (agy)"]
@@ -54,7 +54,14 @@ Every agy call passes `--disable-slash-commands`, so the goal text can never tri
 
 axo records an execution trace of every run: a tree of timed spans covering setup (`CreateGateway`, `CreateWorkspace`, waiting for Ready), planning, each round, each task, every attempt (`CreateTask`, start, the agy worker, `DeleteTask`), every tool call a worker makes (command, exit code, output), reviews, and synthesis. agy prompts and responses, reported task results, and errors are kept as span attributes.
 
-- **Live viewer:** press **`ctrl+t`** in the TUI to open a browser with a live waterfall of the run. It updates as spans start and finish, and you can click a span to see its attributes and events. Press `ctrl+t` again for another window; the viewer stops when axo exits.
+- **Live viewer:** press **`ctrl+t`** in the TUI to open the run in your browser. It updates live and has two views:
+  - **Overview** (default): a graph of setup (Gateway, Workspace, Ready), the plan, every task wired by its dependencies, reviews, follow-up tasks, and synthesis. Tasks that haven't started yet show as pending, and edges into running tasks are animated. Each task node lists its tool calls (`ssh`, `read_file`, `write_file`) live as they run. Click a task to inspect its goal, dependencies, reported summary, details, and patch; its axo events; and an expandable execution tree of attempts, AX calls, the agy worker's prompt and response, and every tool call with its command and output. Clicking a tool call jumps straight to it.
+  - **axo events**: a live feed under the overview of every axo progress line: setup steps, planned and created tasks, worker commands and failures, results, reviews, and warnings. Click a line to inspect its task.
+  - **Timeline**: a waterfall of every span.
+
+  Press `ctrl+t` again for another window; the viewer stops when axo exits.
+
+  ![axo trace viewer](assets/trace-viewer.png)
 - **Trace file:** `--trace-file trace.json` writes the full trace as JSON when the run ends. This also works headless.
 
 The viewer is served only on `127.0.0.1` with a random port. Each `ctrl+t` mints a one-time login link that is exchanged for an `HttpOnly`, `SameSite=Strict` session cookie. Requests with any other `Host` header (to block DNS rebinding) and anything other than `GET` are refused. The page runs under a strict Content-Security-Policy with no external scripts, and span data is only ever rendered as text.

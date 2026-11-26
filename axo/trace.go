@@ -46,8 +46,8 @@ const (
 
 // maxSpanEvents and maxAttrLen bound how much one span can hold.
 const (
-	maxSpanEvents = 200
-	maxAttrLen    = 8000
+	maxSpanEvents = 2000     // the run span collects every axo progress line
+	maxAttrLen    = 64 << 10 // fits agy prompts and the task graph
 	maxSpans      = 5000
 )
 

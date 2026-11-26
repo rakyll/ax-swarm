@@ -15,12 +15,25 @@
     <span id="run-elapsed" class="muted"></span>
     <span id="run-tasks" class="muted"></span>
     <span class="spacer"></span>
-    <label class="toggle"><input type="checkbox" id="show-tools" checked> tool calls</label>
-    <label class="toggle"><input type="checkbox" id="follow" checked> follow</label>
+    <span class="tabs">
+      <button type="button" id="tab-overview" class="tab active">Overview</button>
+      <button type="button" id="tab-timeline" class="tab">Timeline</button>
+    </span>
+    <span class="timeline-only hidden">
+      <label class="toggle"><input type="checkbox" id="show-tools" checked> tool calls</label>
+      <label class="toggle"><input type="checkbox" id="follow" checked> follow</label>
+    </span>
     <span id="conn" class="conn">●</span>
   </header>
   <main>
-    <section class="waterfall">
+    <section id="overview-view" class="overview-view">
+      <div id="graph" class="graph"></div>
+      <div class="events-pane">
+        <div class="events-head muted">axo events</div>
+        <div id="events" class="events"></div>
+      </div>
+    </section>
+    <section id="timeline-view" class="waterfall hidden">
       <div class="axis-row">
         <div class="name-col muted">span</div>
         <div class="track" id="axis"></div>
@@ -28,7 +41,7 @@
       <div id="rows"></div>
     </section>
     <aside id="details" class="details">
-      <p class="muted">Select a span to see its attributes and events.</p>
+      <p class="muted">Select a task to inspect it.</p>
     </aside>
   </main>
   <footer class="legend" id="legend"></footer>

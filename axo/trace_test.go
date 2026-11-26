@@ -147,6 +147,13 @@ func TestOrchestratorRecordsTrace(t *testing.T) {
 	if s, _ := spanByName(spans, "CreateGateway axo-test"); parentName(s) != "setup" || s.Kind != SpanAX {
 		t.Errorf("CreateGateway span = %+v", s)
 	}
+	var graph []graphNode
+	if err := json.Unmarshal([]byte(root.Attrs["graph"]), &graph); err != nil || len(graph) != 3 {
+		t.Fatalf("graph attr = %q (%v)", root.Attrs["graph"], err)
+	}
+	if g := graph[2]; g.ID != "c" || strings.Join(g.DependsOn, ",") != "a,b" || g.Round != 1 || g.Goal != "combine" {
+		t.Errorf("graph node c = %+v", g)
+	}
 	if s, _ := spanByName(spans, "plan"); s.Attrs["tasks"] != "3" || s.Attrs["role"] != "planner" || s.Attrs["prompt"] == "" {
 		t.Errorf("plan span attrs = %v", s.Attrs)
 	}

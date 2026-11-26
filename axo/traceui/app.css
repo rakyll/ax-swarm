@@ -217,3 +217,122 @@ pre.block {
   border-radius: 2px;
   vertical-align: middle;
 }
+
+/* ---------- tabs ---------- */
+
+.hidden { display: none !important; }
+
+.tabs { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+
+.tab {
+  background: transparent;
+  color: var(--muted);
+  border: 0;
+  padding: 3px 12px;
+  font: inherit;
+  cursor: pointer;
+}
+.tab + .tab { border-left: 1px solid var(--line); }
+.tab.active { background: var(--line); color: var(--text); }
+
+/* ---------- overview graph ---------- */
+
+.overview-view { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.graph { padding: 24px; flex: 1; overflow: auto; min-height: 0; }
+.graph svg { display: block; }
+
+.node { cursor: pointer; }
+.node .box {
+  fill: var(--panel);
+  stroke: var(--line);
+  stroke-width: 1.5;
+}
+.node:hover .box { stroke: var(--muted); }
+.node.selected .box { stroke: #89dceb; stroke-width: 2.5; }
+.node .stripe { stroke: none; }
+.node .n-label { fill: var(--text); font-weight: bold; font-size: 13px; }
+.node .n-sub { fill: var(--muted); font-size: 12px; }
+.node .n-meta { font-size: 11px; }
+
+.node.st-pending .box { stroke-dasharray: 5 4; }
+.node.st-pending .n-label { fill: var(--muted); }
+.node.st-running .box { stroke: var(--phase); animation: pulse 1.4s ease-in-out infinite; }
+.node.st-ok .box { stroke: var(--ok); }
+.node.st-error .box { stroke: var(--error); }
+.node.st-warn .box { stroke: var(--warn); }
+.node.st-skipped { opacity: 0.45; }
+
+@keyframes pulse { 50% { stroke-opacity: 0.35; } }
+
+.n-meta.st-pending, .n-meta.st-skipped { fill: var(--muted); }
+.n-meta.st-running { fill: var(--phase); }
+.n-meta.st-ok { fill: var(--ok); }
+.n-meta.st-error { fill: var(--error); }
+.n-meta.st-warn { fill: var(--warn); }
+
+.fill-task { fill: var(--task); }
+.fill-agy { fill: var(--agy); }
+
+.edge { fill: none; stroke: var(--line); stroke-width: 1.5; }
+.edge.done { stroke: #585b70; }
+.edge.active { stroke: var(--phase); stroke-dasharray: 6 5; animation: flow 0.9s linear infinite; }
+@keyframes flow { to { stroke-dashoffset: -22; } }
+.arrow { fill: #585b70; }
+
+/* ---------- inspector ---------- */
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--task);
+  font: inherit;
+  font-size: 12px;
+  padding: 0 8px;
+  cursor: pointer;
+}
+.chip:hover { border-color: var(--task); }
+
+.exec details { margin: 2px 0 2px 12px; }
+.exec > details { margin-left: 0; }
+.exec summary { cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.exec summary .kind { min-width: 60px; }
+.exec .attrs { margin: 4px 0 8px 16px; }
+.exec .dur { position: static; margin-left: 6px; }
+
+.sw-pending { border: 1px dashed var(--muted); }
+.sw-running { background: var(--phase); }
+.sw-ok { background: var(--ok); }
+.sw-warn { background: var(--warn); }
+.sw-error { background: var(--error); }
+.sw-skipped { background: var(--line); }
+
+/* ---------- tool rows inside task nodes ---------- */
+
+.node .t-row { font-size: 11px; fill: var(--text); }
+.node .t-row.st-error { fill: var(--error); }
+.node .t-row.st-running { fill: var(--phase); }
+.node .t-row.st-warn { fill: var(--warn); }
+.node .t-more { font-size: 11px; fill: var(--muted); }
+.node .t-hit { fill: transparent; cursor: pointer; }
+.node .t-hit:hover { fill: rgba(137, 180, 250, 0.10); }
+.node .sep { stroke: var(--line); }
+.fill-ax { fill: var(--ax); }
+
+/* ---------- event feed ---------- */
+
+.events-pane {
+  flex: 0 0 200px;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+  min-height: 0;
+}
+.events-head { padding: 4px 16px; font-size: 11px; border-bottom: 1px solid var(--line); }
+.events { flex: 1; overflow: auto; padding: 4px 16px; font-size: 12px; }
+.events .event { white-space: pre-wrap; word-break: break-word; }
+.events .event.link { cursor: pointer; }
+.events .event.link:hover { background: rgba(137, 180, 250, 0.08); }
+.event.s-info { color: var(--text); }
