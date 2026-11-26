@@ -25,13 +25,16 @@ Set PlaybackSpeed 8
 
 # Workers run `ax ssh`; use the ax on PATH, which matches the cluster's AX
 # version, rather than the default $AX_ROOT/bin/ax. The distinctive prompt
-# lets the Wait below detect when axo has exited.
+# lets the Wait below detect when axo has exited; an empty PS2 keeps the
+# continuation line of the two-line command clean.
 Hide
-Type "export PATH=$HOME/go/bin:$HOME/.local/bin:$PATH AX_BIN=$(command -v ax) PS1='❯ ' && clear"
+Type "export PATH=$HOME/go/bin:$HOME/.local/bin:$PATH AX_BIN=$(command -v ax) PS1='❯ ' PS2='' && clear"
 Enter
 Show
 
-Type `axo --name demo "Benchmark slicing, reversed(), and a loop for reversing a string in Python in the workspace. Answer in three short lines."`
+Type `axo --workspace '{"setup":{"git":[{"repo":"https://github.com/chalk/chalk"}]}}' \`
+Enter
+Type `  "Why would I use this library, and what are its weak spots?"`
 Sleep 500ms
 Enter
 
