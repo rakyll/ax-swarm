@@ -130,11 +130,13 @@ type AgyEvent struct {
 	// output of a run_command call (recorded in traces).
 	ToolCommand    string
 	ToolOutputFull string
-	ToolOutput     string
-	ToolExitCode   int
-	HasExitCode    bool
-	Status         string
-	Response       string
+	// ToolPath is the file a file tool (view_file, write_to_file, ...) acts on.
+	ToolPath     string
+	ToolOutput   string
+	ToolExitCode int
+	HasExitCode  bool
+	Status       string
+	Response     string
 	// Structured is result.structured_output: the schema-validated JSON
 	// object agy returns when --json-schema is set.
 	Structured string
@@ -287,6 +289,12 @@ func parseStepUpdate(st *rawAgyStep) (AgyEvent, bool) {
 			toolErr = "tool call failed"
 		}
 		ev := AgyEvent{Kind: AgyEventTool, StepIndex: st.StepIndex, ToolName: name, ToolState: st.State, ErrorText: toolErr}
+		for _, key := range []string{"AbsolutePath", "TargetFile", "Path", "path"} {
+			if p := paramString(params, key); p != "" {
+				ev.ToolPath = p
+				break
+			}
+		}
 		if name == "run_command" {
 			ev.ToolCommand = paramString(params, "CommandLine")
 			ev.ToolSummary = summarizeCommand(ev.ToolCommand)

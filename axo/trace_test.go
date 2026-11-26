@@ -182,8 +182,30 @@ func TestOrchestratorRecordsTrace(t *testing.T) {
 			tool = s
 		}
 	}
-	if tool.Status != StatusSpanOK || tool.Attrs["exit_code"] != "0" || tool.Attrs["command"] == "" {
+	if tool.Name != "ssh" || tool.Status != StatusSpanOK || tool.Attrs["exit_code"] != "0" || tool.Attrs["command"] != "ax ssh x -- ls" {
 		t.Errorf("tool span = %+v", tool)
+	}
+}
+
+func TestToolLabel(t *testing.T) {
+	for tool, want := range map[string]string{
+		"run_command":                "ssh",
+		"view_file":                  "read_file",
+		"write_to_file":              "write_file",
+		"replace_file_content":       "write_file",
+		"multi_replace_file_content": "write_file",
+		"":                           "tool",
+	} {
+		if got := toolLabel(tool); got != want {
+			t.Errorf("toolLabel(%q) = %q, want %q", tool, got, want)
+		}
+	}
+}
+
+func TestParseToolPath(t *testing.T) {
+	ev, ok := parseAgyStreamLine(`{"event":"step_update","step_update":{"step_index":7,"step_type":"tool","state":"ACTIVE","tool_name":"view_file","tool_info":{"parameters":{"AbsolutePath":"/tmp/x.go"}}}}`)
+	if !ok || ev.StepIndex != 7 || ev.ToolPath != "/tmp/x.go" || toolLabel(ev.ToolName) != "read_file" {
+		t.Fatalf("event = %+v", ev)
 	}
 }
 

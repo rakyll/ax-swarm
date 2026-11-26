@@ -905,13 +905,14 @@ func (o *Orchestrator) workerEvents(t *taskRun, wspan *SpanRef) (onEvent func(Ag
 		if sp, ok := tools[ev.StepIndex]; ok {
 			return sp
 		}
-		name := summary
-		if name == "" {
-			name = ev.ToolName
+		attrs := map[string]string{"tool": ev.ToolName}
+		if ev.ToolCommand != "" {
+			attrs["command"] = strings.ReplaceAll(ev.ToolCommand, o.axBase, "ax")
 		}
-		sp := o.Trace.Start(wspan, name, SpanTool, map[string]string{
-			"tool": ev.ToolName, "command": strings.ReplaceAll(ev.ToolCommand, o.axBase, "ax"),
-		})
+		if ev.ToolPath != "" {
+			attrs["path"] = ev.ToolPath
+		}
+		sp := o.Trace.Start(wspan, toolLabel(ev.ToolName), SpanTool, attrs)
 		tools[ev.StepIndex] = sp
 		return sp
 	}
@@ -975,6 +976,25 @@ func (o *Orchestrator) workerEvents(t *taskRun, wspan *SpanRef) (onEvent func(Ag
 		}
 	}
 	return onEvent, closeOpen
+}
+
+// toolLabel is the trace label for a worker tool call: `ssh` for shell
+// commands (workers only run `ax ssh` into their AX Task), `read_file` or
+// `write_file` for agy's file tools, and the raw tool name otherwise. The
+// full command or path is kept as a span attribute.
+func toolLabel(tool string) string {
+	switch tool {
+	case "run_command":
+		return "ssh"
+	case "view_file", "read_file":
+		return "read_file"
+	case "write_to_file", "replace_file_content", "multi_replace_file_content", "sed_file", "notebook_edit", "write_file", "edit_file":
+		return "write_file"
+	case "":
+		return "tool"
+	default:
+		return tool
+	}
 }
 
 // reports returns the reports of all finished tasks in plan order.
