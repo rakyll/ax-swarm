@@ -48,7 +48,6 @@ header {
 .run-name { color: #89dceb; font-weight: bold; }
 .muted { color: var(--muted); }
 .spacer { flex: 1; }
-.toggle { color: var(--muted); cursor: pointer; user-select: none; }
 .conn { color: var(--muted); }
 .conn.live { color: var(--ok); }
 .conn.down { color: var(--error); }
@@ -65,42 +64,6 @@ header {
 
 main { flex: 1; display: flex; min-height: 0; }
 
-.waterfall { flex: 1; overflow: auto; min-width: 0; }
-
-.axis-row, .row {
-  display: flex;
-  align-items: center;
-  min-height: 22px;
-  border-bottom: 1px solid rgba(49, 50, 68, 0.5);
-}
-
-.axis-row {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  background: var(--bg);
-  border-bottom: 1px solid var(--line);
-}
-
-.row { cursor: pointer; }
-.row:hover { background: rgba(137, 180, 250, 0.06); }
-.row.selected { background: rgba(137, 180, 250, 0.14); }
-
-.name-col {
-  flex: 0 0 360px;
-  max-width: 360px;
-  padding: 2px 8px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.caret {
-  display: inline-block;
-  width: 14px;
-  color: var(--muted);
-}
-
 .kind {
   display: inline-block;
   min-width: 52px;
@@ -109,56 +72,7 @@ main { flex: 1; display: flex; min-height: 0; }
   color: var(--muted);
 }
 
-.track {
-  position: relative;
-  flex: 1;
-  height: 22px;
-  margin-right: 12px;
-}
-
-.tick {
-  position: absolute;
-  top: 0;
-  height: 100%;
-  border-left: 1px solid var(--line);
-  padding-left: 3px;
-  font-size: 11px;
-  color: var(--muted);
-}
-
-.bar {
-  position: absolute;
-  top: 5px;
-  height: 12px;
-  min-width: 2px;
-  border-radius: 2px;
-  opacity: 0.9;
-}
-
-.bar.running {
-  background-image: repeating-linear-gradient(
-    -45deg, rgba(255, 255, 255, 0.25) 0 6px, transparent 6px 12px);
-  background-size: 17px 17px;
-  animation: stripes 0.8s linear infinite;
-}
-
-@keyframes stripes { to { background-position: 17px 0; } }
-
-.bar.error { outline: 2px solid var(--error); }
-.bar.warn { outline: 2px solid var(--warn); }
-.bar.skipped { opacity: 0.35; }
-
-.k-run { background: var(--run); }
-.k-phase { background: var(--phase); }
-.k-task { background: var(--task); }
-.k-attempt { background: var(--attempt); }
-.k-ax { background: var(--ax); }
-.k-agy { background: var(--agy); }
-.k-tool { background: var(--tool); }
-
 .dur {
-  position: absolute;
-  top: 3px;
   font-size: 11px;
   color: var(--muted);
   white-space: nowrap;
@@ -217,23 +131,6 @@ pre.block {
   border-radius: 2px;
   vertical-align: middle;
 }
-
-/* ---------- tabs ---------- */
-
-.hidden { display: none !important; }
-
-.tabs { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
-
-.tab {
-  background: transparent;
-  color: var(--muted);
-  border: 0;
-  padding: 3px 12px;
-  font: inherit;
-  cursor: pointer;
-}
-.tab + .tab { border-left: 1px solid var(--line); }
-.tab.active { background: var(--line); color: var(--text); }
 
 /* ---------- overview graph ---------- */
 
@@ -299,7 +196,7 @@ pre.block {
 .exec summary { cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .exec summary .kind { min-width: 60px; }
 .exec .attrs { margin: 4px 0 8px 16px; }
-.exec .dur { position: static; margin-left: 6px; }
+.exec .dur { margin-left: 6px; }
 
 .sw-pending { border: 1px dashed var(--muted); }
 .sw-running { background: var(--phase); }
@@ -320,19 +217,4 @@ pre.block {
 .node .sep { stroke: var(--line); }
 .fill-ax { fill: var(--ax); }
 
-/* ---------- event feed ---------- */
-
-.events-pane {
-  flex: 0 0 200px;
-  display: flex;
-  flex-direction: column;
-  border-top: 1px solid var(--line);
-  background: var(--panel);
-  min-height: 0;
-}
-.events-head { padding: 4px 16px; font-size: 11px; border-bottom: 1px solid var(--line); }
-.events { flex: 1; overflow: auto; padding: 4px 16px; font-size: 12px; }
-.events .event { white-space: pre-wrap; word-break: break-word; }
-.events .event.link { cursor: pointer; }
-.events .event.link:hover { background: rgba(137, 180, 250, 0.08); }
 .event.s-info { color: var(--text); }

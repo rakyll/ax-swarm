@@ -89,7 +89,7 @@ func writeTaskRules(b *strings.Builder, cfg Config, maxTasks int) {
 func BuildPlannerPrompt(cfg Config) string {
 	var b strings.Builder
 	b.WriteString(plannerHeader + "\n\n")
-	b.WriteString("You are the planner of a custom task orchestrator. Break the user's goal into a dependency graph of tasks. The orchestrator will run each task in its own AX Task sandbox with a dedicated worker agent, review the results, and synthesize the final answer.\n\n")
+	b.WriteString("You are the planner of a custom task orchestrator. Break the user's goal into a dependency graph of tasks. The orchestrator will run each task in its own AX Task with a dedicated worker agent, review the results, and synthesize the final answer.\n\n")
 	b.WriteString("## Goal\n\n")
 	b.WriteString(strings.TrimSpace(cfg.Goal) + "\n\n")
 	writeEnvironment(&b, cfg)
@@ -202,7 +202,7 @@ func BuildReviewerPrompt(cfg Config, reports []TaskReport, round, remainingTasks
 func BuildSynthesisPrompt(cfg Config, reports []TaskReport) string {
 	var b strings.Builder
 	b.WriteString(synthesizerHeader + "\n\n")
-	b.WriteString("You are the synthesizer of a custom task orchestrator. Worker agents ran the tasks below inside isolated AX sandboxes. Write the final answer to the goal for the user.\n\n")
+	b.WriteString("You are the synthesizer of a custom task orchestrator. Worker agents ran the tasks below, each inside its own isolated AX Task. Write the final answer to the goal for the user.\n\n")
 	b.WriteString("## Goal\n\n")
 	b.WriteString(strings.TrimSpace(cfg.Goal) + "\n\n")
 	b.WriteString("## Task Reports\n\n")

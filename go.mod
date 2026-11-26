@@ -1,4 +1,4 @@
-module github.com/rakyll/ax-swarm
+module github.com/rakyll/axo
 
 go 1.27.1
 

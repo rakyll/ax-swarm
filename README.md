@@ -1,6 +1,6 @@
 # axo
 
-**Give it a goal. axo plans it, fans the work out across AX sandboxes, and hands you the answer.**
+**Give it a goal. axo plans it, fans the work out across AX tasks, and hands you the answer.**
 
 ![axo demo](assets/demo.gif)
 
@@ -9,7 +9,7 @@ axo is a task orchestrator for [AX](https://github.com/google/ax) driven by plai
 ## Quickstart
 
 ```bash
-make install   # installs axo into $(go env GOPATH)/bin
+go install github.com/rakyll/axo@latest   # or `make install` from a clone
 
 axo --workspace '{"setup":{"git":[{"repo":"https://github.com/chalk/chalk"}]}}' \
   "Why would I use this library, and what are its weak spots?"
@@ -21,12 +21,12 @@ Leave off the goal to type it in the TUI. Add `--dry-run` to preview everything 
 
 ```mermaid
 flowchart LR
-  S["Setup: 1 Gateway + 1 Workspace"] --> P["Plan (agy, JSON schema)"]
-  P --> E["Execute task graph<br/>one AX Task + agy worker per task<br/>up to --parallel at once"]
-  E --> R{"Review (agy, JSON schema)"}
-  R -- "follow-up tasks" --> E
-  R -- complete / --max-rounds --> Y["Synthesize answer (agy)"]
-  Y --> C["Cleanup: tasks, Workspace, Gateway"]
+  S["Setup<br/>1 Gateway + 1 Workspace"] --> P["Plan<br/>agy splits the goal into tasks"]
+  P --> E["Execute<br/>one AX Task + agy worker per task,<br/>in parallel"]
+  E --> R{"Review"}
+  R -->|"follow-up tasks"| E
+  R -->|"goal met"| Y["Answer<br/>agy writes it up"]
+  Y --> C["Clean up"]
 ```
 
 1. **Plan:** agy splits your goal into a graph of tasks.
@@ -42,7 +42,6 @@ Press **`ctrl+t`** while axo runs to open a live view in your browser.
 
 - **Overview:** the whole run as a graph: setup, plan, tasks and their dependencies, reviews, synthesis. Each task shows its tool calls (`ssh`, `read_file`, `write_file`) as they happen.
 - **Inspect:** click any task for its goal, results, patch, events, and every attempt, prompt, command, and output.
-- **Timeline:** a waterfall of every step.
 
 Want it on disk? `--trace-file trace.json` saves the full trace when the run ends.
 
@@ -77,7 +76,3 @@ Run `axo --help` for the rest (`--allow-host`, `--atespace`, `--context`, `--ser
 ```bash
 go test -race ./...
 ```
-
-## ax-swarm
-
-[`swarm/`](swarm) holds **ax-swarm**, the predecessor: the same AX setup, driven by agy's native `/swarm` mode instead of axo's own orchestration loop. See [swarm/README.md](swarm/README.md).

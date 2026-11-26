@@ -1,5 +1,5 @@
 // Live trace viewer for axo. Receives spans over Server-Sent Events and draws
-// them as an overview graph of the run (default) or a timeline. All DOM is built with
+// them as an overview graph of the run. All DOM is built with
 // createElement/createElementNS/textContent: span names, attributes, and
 // events come from agy and the AX cluster and are untrusted.
 'use strict';
@@ -8,18 +8,14 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 
 const spans = new Map(); // id -> span
 const children = new Map(); // parent id -> [child ids]
-const collapsed = new Set(); // timeline rows collapsed by the user
 const openDetails = new Set(); // inspector <details> the user expanded
 
-let view = 'overview';
-let selectedSpan = null; // timeline selection (span id)
 let selectedNode = null; // overview selection (node key)
 let watched = new Set(); // span ids shown in the inspector
 let serverSkewMs = 0; // server now - client now
 let dirty = true;
 let detailsDirty = false;
 
-const KINDS = ['run', 'phase', 'task', 'attempt', 'ax', 'agy', 'tool'];
 const KIND_LABELS = {
   run: 'run', phase: 'phase', task: 'task', attempt: 'attempt',
   ax: 'ax api', agy: 'agy', tool: 'tool call',
@@ -71,7 +67,7 @@ function upsert(s) {
     if (!children.has(p)) children.set(p, []);
     children.get(p).push(s.id);
   }
-  if (s.id === selectedSpan || watched.has(s.id) || watched.has(s.parent) ||
+  if (watched.has(s.id) || watched.has(s.parent) ||
       (s.kind === 'run' && selectedNode)) {
     detailsDirty = true;
   }
@@ -115,12 +111,10 @@ function renderHeader() {
 function renderLegend() {
   const legend = $('legend');
   legend.replaceChildren();
-  const items = view === 'overview'
-    ? [['pending', 'pending'], ['running', 'running'], ['ok', 'done'], ['warn', 'blocked'], ['error', 'failed'], ['skipped', 'skipped']]
-    : KINDS.map((k) => ['k-' + k, KIND_LABELS[k]]);
+  const items = [['pending', 'pending'], ['running', 'running'], ['ok', 'done'], ['warn', 'blocked'], ['error', 'failed'], ['skipped', 'skipped']];
   for (const [cls, label] of items) {
     const item = el('span');
-    const sw = el('span', 'swatch ' + (view === 'overview' ? 'sw-' + cls : cls));
+    const sw = el('span', 'swatch sw-' + cls);
     item.appendChild(sw);
     item.appendChild(document.createTextNode(label));
     legend.appendChild(item);
@@ -442,8 +436,6 @@ function selectNode(key) {
 
 // ---------- axo events ----------
 
-let renderedEvents = -1;
-
 // taskOfEvent finds the task an axo progress line is about, e.g.
 // "[fib-30] ax ssh …", "task fib-30 done …", "ax task <name> created for task fib-30".
 function taskOfEvent(text, tasks) {
@@ -454,33 +446,11 @@ function taskOfEvent(text, tasks) {
   return null;
 }
 
-function eventLine(e, tasks, clickable) {
+function eventLine(e) {
   const line = el('div', 'event s-' + (e.level || 'info'));
   line.appendChild(el('span', 't', fmtClock(t(e.time))));
   line.appendChild(document.createTextNode(e.text));
-  const id = clickable ? taskOfEvent(e.text, tasks) : null;
-  if (id) {
-    line.classList.add('link');
-    line.title = 'inspect task ' + id;
-    line.addEventListener('click', () => selectNode('task:' + id));
-  }
   return line;
-}
-
-// renderEvents shows the run span's events: every axo progress line (tasks
-// planned and created, worker commands, results, reviews, warnings).
-function renderEvents() {
-  const run = runSpan();
-  const evs = (run && run.events) || [];
-  if (evs.length === renderedEvents) return;
-  renderedEvents = evs.length;
-  const box = $('events');
-  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 24;
-  const tasks = buildGraph().tasks;
-  const frag = document.createDocumentFragment();
-  for (const e of evs) frag.appendChild(eventLine(e, tasks, true));
-  box.replaceChildren(frag);
-  if (atBottom) box.scrollTop = box.scrollHeight;
 }
 
 // ---------- inspector ----------
@@ -615,7 +585,7 @@ function renderInspector() {
     const mine = ((run && run.events) || []).filter((e) => taskOfEvent(e.text, g.tasks) === task.id);
     if (mine.length) {
       const d = detailsFor('events:' + task.id, 'events (' + mine.length + ')');
-      for (const e of mine) d.appendChild(eventLine(e, g.tasks, false));
+      for (const e of mine) d.appendChild(eventLine(e));
       box.appendChild(el('h3', null, 'axo events'));
       box.appendChild(d);
     }
@@ -655,168 +625,18 @@ function renderInspector() {
   }
 }
 
-// ---------- timeline ----------
-
-function visibleRows() {
-  const out = [];
-  const showTools = $('show-tools').checked;
-  const walk = (id, depth) => {
-    for (const cid of children.get(id) || []) {
-      const s = spans.get(cid);
-      if (!s) continue;
-      if (s.kind === 'tool' && !showTools) continue;
-      out.push({ s, depth });
-      if (!collapsed.has(cid)) walk(cid, depth + 1);
-    }
-  };
-  walk('', 0);
-  return out;
-}
-
-function bounds() {
-  let lo = Infinity;
-  let hi = -Infinity;
-  for (const s of spans.values()) {
-    lo = Math.min(lo, t(s.start));
-    hi = Math.max(hi, endOf(s));
-  }
-  if (!isFinite(lo)) { lo = now(); hi = lo + 1000; }
-  if (hi - lo < 1000) hi = lo + 1000;
-  return { lo, hi };
-}
-
-function niceStep(totalMs) {
-  const steps = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600].map((x) => x * 1000);
-  for (const st of steps) if (totalMs / st <= 8) return st;
-  return 7200 * 1000;
-}
-
-function renderAxis(b) {
-  const axis = $('axis');
-  axis.replaceChildren();
-  const total = b.hi - b.lo;
-  const step = niceStep(total);
-  for (let x = 0; x <= total; x += step) {
-    const tick = el('div', 'tick', fmtDur(x));
-    tick.style.left = (100 * x / total) + '%';
-    axis.appendChild(tick);
-  }
-}
-
-function renderRows(b) {
-  const frag = document.createDocumentFragment();
-  const total = b.hi - b.lo;
-  for (const { s, depth } of visibleRows()) {
-    const row = el('div', 'row' + (s.id === selectedSpan ? ' selected' : ''));
-    row.addEventListener('click', () => { selectedSpan = s.id; dirty = true; detailsDirty = true; });
-
-    const name = el('div', 'name-col');
-    name.style.paddingLeft = (8 + depth * 14) + 'px';
-    const hasKids = (children.get(s.id) || []).length > 0;
-    const caret = el('span', 'caret', hasKids ? (collapsed.has(s.id) ? '▸' : '▾') : '');
-    if (hasKids) {
-      caret.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        if (collapsed.has(s.id)) collapsed.delete(s.id); else collapsed.add(s.id);
-        dirty = true;
-      });
-    }
-    name.appendChild(caret);
-    name.appendChild(el('span', 'kind', KIND_LABELS[s.kind] || s.kind));
-    const label = el('span', 's-' + s.status, s.name);
-    label.title = s.name;
-    name.appendChild(label);
-    row.appendChild(name);
-
-    const track = el('div', 'track');
-    const start = t(s.start);
-    const end = endOf(s);
-    const bar = el('div', 'bar k-' + (KINDS.includes(s.kind) ? s.kind : 'run') +
-      (s.status === 'running' ? ' running' : '') +
-      (s.status === 'error' ? ' error' : '') +
-      (s.status === 'warn' ? ' warn' : '') +
-      (s.status === 'skipped' ? ' skipped' : ''));
-    const left = 100 * (start - b.lo) / total;
-    const width = Math.max(0.15, 100 * (end - start) / total);
-    bar.style.left = left + '%';
-    bar.style.width = width + '%';
-    track.appendChild(bar);
-    const dur = el('div', 'dur', fmtDur(end - start));
-    dur.style.left = 'calc(' + Math.min(left + width, 92) + '% + 4px)';
-    track.appendChild(dur);
-    row.appendChild(track);
-    frag.appendChild(row);
-  }
-  $('rows').replaceChildren(frag);
-}
-
-function renderSpanDetails() {
-  const box = $('details');
-  const s = selectedSpan && spans.get(selectedSpan);
-  if (!s) {
-    box.replaceChildren(el('p', 'muted', 'Select a span to see its attributes and events.'));
-    return;
-  }
-  watched = new Set([s.id]);
-  box.replaceChildren();
-  box.appendChild(el('h2', 's-' + s.status, s.name));
-  const grid = el('div', 'kv');
-  kvRow(grid, 'kind', KIND_LABELS[s.kind] || s.kind);
-  kvRow(grid, 'status', s.status);
-  kvRow(grid, 'started', fmtClock(t(s.start)));
-  kvRow(grid, 'duration', fmtDur(endOf(s) - t(s.start)) + (s.end ? '' : ' (running)'));
-  box.appendChild(grid);
-  if (Object.keys(s.attrs || {}).length) {
-    box.appendChild(el('h3', null, 'attributes'));
-    attrsBlock(box, s);
-  }
-  if (s.events && s.events.length) {
-    box.appendChild(el('h3', null, 'events'));
-    for (const e of s.events) {
-      const line = el('div', 'event s-' + (e.level || 'ok'));
-      line.appendChild(el('span', 't', fmtClock(t(e.time))));
-      line.appendChild(document.createTextNode(e.text));
-      box.appendChild(line);
-    }
-  }
-}
-
 // ---------- main loop ----------
-
-function setView(v) {
-  view = v;
-  $('tab-overview').classList.toggle('active', v === 'overview');
-  $('tab-timeline').classList.toggle('active', v === 'timeline');
-  $('overview-view').classList.toggle('hidden', v !== 'overview');
-  $('timeline-view').classList.toggle('hidden', v !== 'timeline');
-  document.querySelector('.timeline-only').classList.toggle('hidden', v !== 'timeline');
-  renderLegend();
-  dirty = true;
-  detailsDirty = true;
-}
 
 function render() {
   renderHeader();
-  if (view === 'overview') {
-    renderOverview();
-    if (detailsDirty) {
-      renderInspector();
-      detailsDirty = false;
-      if (scrollToSpan) {
-        const target = [...document.querySelectorAll('#details details')].find((d) => d.dataset.span === scrollToSpan);
-        if (target) target.scrollIntoView({ block: 'center' });
-        scrollToSpan = null;
-      }
-    }
-    renderEvents();
-  } else {
-    const b = bounds();
-    renderAxis(b);
-    renderRows(b);
-    if (detailsDirty) { renderSpanDetails(); detailsDirty = false; }
-    if ($('follow').checked) {
-      const wf = document.querySelector('.waterfall');
-      wf.scrollTop = wf.scrollHeight;
+  renderOverview();
+  if (detailsDirty) {
+    renderInspector();
+    detailsDirty = false;
+    if (scrollToSpan) {
+      const target = [...document.querySelectorAll('#details details')].find((d) => d.dataset.span === scrollToSpan);
+      if (target) target.scrollIntoView({ block: 'center' });
+      scrollToSpan = null;
     }
   }
 }
@@ -842,7 +662,7 @@ function connect() {
     try { msg = JSON.parse(ev.data); } catch (_) { return; }
     if (!msg || !Array.isArray(msg.spans)) return;
     if (msg.now) serverSkewMs = Date.parse(msg.now) - Date.now();
-    if (msg.type === 'snapshot') { reset(); detailsDirty = true; renderedEvents = -1; }
+    if (msg.type === 'snapshot') { reset(); detailsDirty = true; }
     for (const s of msg.spans) {
       if (s && typeof s.id === 'string') upsert(s);
     }
@@ -850,10 +670,6 @@ function connect() {
   };
 }
 
-$('tab-overview').addEventListener('click', () => setView('overview'));
-$('tab-timeline').addEventListener('click', () => setView('timeline'));
-$('show-tools').addEventListener('change', () => { dirty = true; });
-$('follow').addEventListener('change', () => { dirty = true; });
-setView('overview');
+renderLegend();
 connect();
 loop();
