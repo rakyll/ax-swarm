@@ -2,11 +2,11 @@
 # Gateway/Workspace/Tasks and a real agy /swarm session) against the local AX
 # cluster. Regenerate with:
 #
-#   vhs assets/demo.tape
+#   (cd swarm && make install) && vhs swarm/assets/demo.tape
 #
 # Requires ax-swarm, ax, and agy on PATH and a running AX cluster.
 
-Output assets/demo.gif
+Output swarm/assets/demo.gif
 
 Require ax-swarm
 Require agy

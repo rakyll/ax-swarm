@@ -1,5 +1,8 @@
 # ax-swarm
 
+> [!NOTE]
+> The main project in this repository is now [**axo**](../README.md), which orchestrates tasks itself with plain `agy -p` calls. ax-swarm lives on here in `swarm/`.
+
 Run an [AX](https://github.com/google/ax) workspace swarm driven by Antigravity CLI's native `/swarm` capability (`agy --output-format stream-json -p "/swarm ..."`).
 
 `ax-swarm` provisions **one shared AX `Gateway` and one shared AX `Workspace` per swarm**, runs `agy /swarm` in the background while streaming only its outputs, and cleans up all `<swarm-name>-*` tasks plus the Workspace and Gateway when done.
@@ -21,7 +24,7 @@ Run an [AX](https://github.com/google/ax) workspace swarm driven by Antigravity 
 ## Install
 
 ```bash
-go install github.com/rakyll/ax-swarm@latest
+cd swarm && make install   # installs ax-swarm into $(go env GOPATH)/bin
 ```
 
 ## Usage
@@ -210,10 +213,10 @@ Rules use `agy`'s syntax: `command(prefix)`, `mcp(server/tool)`, `mcp(server/*)`
 ## Development & Testing
 
 ```bash
-go test -v -race ./...
-go vet ./...
+cd swarm && go test -v -race ./...
+cd swarm && go vet ./...
 ```
 
 ## Repository Layout
 
-- Root (`*.go`, `go.mod`, `Makefile`): Go `ax-swarm` CLI with Bubble Tea UI and `agy /swarm` integration.
+- `swarm/` (`*.go`, `go.mod`, `Makefile`): Go `ax-swarm` CLI with Bubble Tea UI and `agy /swarm` integration. The repository root holds axo.

@@ -1,4 +1,4 @@
-module github.com/rakyll/ax-swarm
+module github.com/rakyll/ax-swarm/swarm
 
 go 1.26
 
