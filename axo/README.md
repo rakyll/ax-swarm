@@ -1,28 +1,23 @@
 # axo
 
-A custom AX task orchestrator built on plain `agy -p` calls. It does **not** use agy's `/swarm` mode. The command line looks like [`ax-swarm`](../README.md): same flags, a Bubble Tea TUI when run in a terminal, and timestamped logs when headless. The difference is that the Go program runs the orchestration loop itself.
-
-Every run creates **exactly one AX `Gateway` and one AX `Workspace`**. Every task runs in its own AX `Task`, and all of those Tasks share that one Workspace and Gateway. Every resource name starts with `axo-`: for run name `<name>`, the Gateway and Workspace are `axo-<name>` and the Tasks are `axo-<name>-<task-id>`.
+**Give it a goal. axo plans it, fans the work out across AX sandboxes, and hands you the answer.**
 
 ![axo demo](assets/demo.gif)
 
-## AX Control Plane API
+axo is a task orchestrator for [AX](https://github.com/google/ax) driven by plain `agy -p` calls (no `/swarm`). Every run gets **one Gateway and one Workspace**; every task runs in its own AX Task on top of them, in parallel.
 
-axo manages AX resources through the **AX control plane API**, the `ax.v1alpha1.AX` gRPC service served by `ax-server`. It uses the public Go client [`github.com/google/ax/client`](https://github.com/google/ax) (pinned to `v0.4.0-rc.2`), not the `ax` CLI:
+## Quickstart
 
-| Operation | RPC |
-|---|---|
-| Create the run's Gateway / Workspace | `CreateGateway`, `CreateWorkspace` (returns once the Workspace is pre-warmed) |
-| Watch Workspace setup | `GetWorkspace` (`status.phase`, `status.last_setup_error`) |
-| Create, start, and watch a task's AX Task | `CreateTask`, `ResumeTask`, `GetTask` |
-| Live task table and cleanup | `ListTasks` (paginated), `DeleteTask`, `DeleteWorkspace`, `DeleteGateway` |
+```bash
+cd axo && make install
 
-The server is located the same way `ax` finds it: `--server` / `$AX_SERVER` if set, otherwise a port-forward to `svc/ax-server` in the kubeconfig context (`--context`). That port-forward is shared with the `ax` CLI and requires `kubectl`. Workspace specs are decoded strictly with `protojson`, so a misspelled field fails validation, including in `--dry-run`, before anything is created. If a Gateway or Workspace with the run's name already exists, axo stops. It never adopts or deletes resources it did not create.
+axo --workspace '{"setup":{"git":[{"repo":"https://github.com/chalk/chalk"}]}}' \
+  "Why would I use this library, and what are its weak spots?"
+```
 
-> [!NOTE]
-> Running commands *inside* a Task is not part of the control plane API: there is no exec RPC. Commands go to the Task's guest daemon through the mTLS atenet-router, and only the `ax` CLI implements that path. So agy workers still run `ax ssh <task> -- …`, and `--ax-bin` must point at an `ax` that matches the cluster's AX version. Everything else axo does goes through the gRPC API.
+Leave off the goal to type it in the TUI. Add `--dry-run` to preview everything without creating anything.
 
-## How It Works
+## How it works
 
 ```mermaid
 flowchart LR
@@ -34,95 +29,51 @@ flowchart LR
   Y --> C["Cleanup: tasks, Workspace, Gateway"]
 ```
 
-1. **Setup**: Creates one Gateway and one Workspace named `axo-<name>` through the control plane API, then waits until the Workspace is `Ready`.
-2. **Plan**: A planner `agy -p --json-schema …` call splits the goal into a dependency graph of tasks. If planning fails, the whole goal runs as one task.
-3. **Execute**: The orchestrator runs tasks as soon as their dependencies finish, up to `--parallel` at a time. For each task it:
-   - creates the AX Task `axo-<name>-<task-id>`, pointing at the shared Workspace and Gateway;
-   - resumes the AX Task and waits until it is `Running`;
-   - runs one `agy -p` worker that may only call `ax ssh <task> …`;
-   - parses the worker's JSON report (`done` / `blocked` / `failed`, plus a summary, details, and an optional patch);
-   - deletes the AX Task.
+1. **Plan:** agy splits your goal into a graph of tasks.
+2. **Execute:** each task gets its own AX Task and an agy worker that works inside it via `ax ssh`. Tasks start as soon as their dependencies finish; results and patches flow to the tasks that depend on them.
+3. **Review:** agy checks the results and adds follow-up tasks until the goal is met.
+4. **Answer:** agy writes the final answer, and axo cleans up after itself.
 
-   Failed workers are retried up to `--max-retries` times in a fresh AX Task (`axo-<name>-<id>-r2`). Dependent tasks receive the reports and patches of the tasks they depend on. Each AX Task has its own copy of `/workspace`, so file changes only move between tasks as patches. If a dependency does not finish, the tasks that depend on it are skipped.
-4. **Review**: A reviewer call decides whether the goal is complete. If it isn't, the reviewer adds follow-up tasks and another round starts. This repeats up to `--max-rounds` rounds and `--max-tasks` tasks in total.
-5. **Synthesize**: A final `agy -p` call writes the answer from all task reports and streams it to stdout.
-6. **Cleanup**: Deletes any remaining `axo-<name>-*` Tasks, then the Workspace and the Gateway, unless `--keep` is set.
+## Watch it live
 
-Every agy call passes `--disable-slash-commands`, so the goal text can never trigger `/swarm` or any other agy command. Planner, reviewer, and synthesizer calls get no tool permissions. Workers only get `command(<ax binary>)` (plus any `--allow` rules), through a per-session `--settings` that is never saved.
+Press **`ctrl+t`** while axo runs to open a live view in your browser.
 
-## Execution Traces
+![axo trace viewer](assets/trace-viewer.png)
 
-axo records an execution trace of every run: a tree of timed spans covering setup (`CreateGateway`, `CreateWorkspace`, waiting for Ready), planning, each round, each task, every attempt (`CreateTask`, start, the agy worker, `DeleteTask`), every tool call a worker makes (command, exit code, output), reviews, and synthesis. agy prompts and responses, reported task results, and errors are kept as span attributes.
+- **Overview:** the whole run as a graph: setup, plan, tasks and their dependencies, reviews, synthesis. Each task shows its tool calls (`ssh`, `read_file`, `write_file`) as they happen.
+- **Inspect:** click any task for its goal, results, patch, events, and every attempt, prompt, command, and output.
+- **Timeline:** a waterfall of every step.
 
-- **Live viewer:** press **`ctrl+t`** in the TUI to open the run in your browser. It updates live and has two views:
-  - **Overview** (default): a graph of setup (Gateway, Workspace, Ready), the plan, every task wired by its dependencies, reviews, follow-up tasks, and synthesis. Tasks that haven't started yet show as pending, and edges into running tasks are animated. Each task node lists its tool calls (`ssh`, `read_file`, `write_file`) live as they run. Click a task to inspect its goal, dependencies, reported summary, details, and patch; its axo events; and an expandable execution tree of attempts, AX calls, the agy worker's prompt and response, and every tool call with its command and output. Clicking a tool call jumps straight to it.
-  - **axo events**: a live feed under the overview of every axo progress line: setup steps, planned and created tasks, worker commands and failures, results, reviews, and warnings. Click a line to inspect its task.
-  - **Timeline**: a waterfall of every span.
+Want it on disk? `--trace-file trace.json` saves the full trace when the run ends.
 
-  Press `ctrl+t` again for another window; the viewer stops when axo exits.
+## Flags
 
-  ![axo trace viewer](assets/trace-viewer.png)
-- **Trace file:** `--trace-file trace.json` writes the full trace as JSON when the run ends. This also works headless.
-
-The viewer is served only on `127.0.0.1` with a random port. Each `ctrl+t` mints a one-time login link that is exchanged for an `HttpOnly`, `SameSite=Strict` session cookie. Requests with any other `Host` header (to block DNS rebinding) and anything other than `GET` are refused. The page runs under a strict Content-Security-Policy with no external scripts, and span data is only ever rendered as text.
-
-## Install
-
-```bash
-cd axo          # a separate Go module (go 1.27.1+), so ax-swarm stays free of the AX/gRPC dependencies
-make build      # ./axo
-make install    # $(go env GOPATH)/bin/axo
-```
-
-## Usage
-
-```bash
-axo --workspace '{"setup":{"git":[{"repo":"https://github.com/chalk/chalk"}]}}' \
-  "Why would I use this library, and what are its weak spots?"
-
-# Omit the goal to type it into the TUI prompt
-axo --workspace-config workspace.json
-
-# Show the manifests and the planner prompt without creating anything
-axo --dry-run --workspace-config workspace.json "Audit the middleware"
-```
-
-The TUI shows the setup steps and then a live table of tasks: orchestrator state, AX Task name, live AX state, and time in the current state. Worker commands print as progress lines above the table. Press `ctrl+t` for the live trace viewer. Press `ctrl+c` once to cancel; workers stop and everything is cleaned up.
-
-### Flags
-
-These flags work the same as in `ax-swarm`: `--workspace`, `--workspace-config`, `--allow-host`, `--atespace`, `--context`, `--server`, `--task-timeout` (Workspace setup timeout), `--keep`, `--model`, `--effort`, `--mode`, `--project`, `--dangerously-skip-permissions` (workers only), `--allow` (workers only), `--ax-bin` (only used by workers for `ax ssh`), `--agy-bin`, `--color`, `--dry-run`.
-
-These flags are new:
-
-| Flag | Default | Description |
+| Flag | Default | What it does |
 |---|---|---|
-| `--name` | random | Run name (max 34 chars). Resources are named `axo-<name>` / `axo-<name>-<task>`; an `axo-` prefix you pass yourself is not doubled |
-| `--parallel` | `4` | Max concurrent AX Tasks / agy workers |
-| `--max-rounds` | `3` | Max plan → execute → review rounds |
-| `--max-retries` | `1` | Retries for a failed worker (0–5), each in a fresh AX Task |
-| `--max-tasks` | `16` | Max total tasks across all rounds |
-| `--worker-timeout` | `20m` | Time limit for each agy worker |
-| `--trace-file` | | Write the run's execution trace as JSON to this file on exit |
+| `--workspace` / `--workspace-config` | | AX Workspace spec, inline JSON or a file |
+| `--name` | random | Run name; resources are named `axo-<name>…` |
+| `--parallel` | `4` | Tasks running at once |
+| `--max-rounds` | `3` | Plan → execute → review rounds |
+| `--max-retries` | `1` | Retries for a failed task |
+| `--max-tasks` | `16` | Total task budget |
+| `--worker-timeout` | `20m` | Time limit per worker |
+| `--model` | `hydrogen-l-tf-medium` | agy model |
+| `--trace-file` | | Save the execution trace as JSON |
+| `--keep` | `false` | Keep AX resources after the run |
+| `--dry-run` | `false` | Print the plan without running anything |
 
-`--auto-resume` was dropped: the orchestrator always resumes the AX Tasks it creates.
+Run `axo --help` for the rest (`--allow-host`, `--atespace`, `--context`, `--server`, `--effort`, `--mode`, `--allow`, …).
 
-Environment variables are the same as `ax-swarm`: `AX_ROOT`, `AX_BIN`, `AX_TASK_IMAGE`, `AX_SERVER`, `AGY_BIN`, `NO_COLOR`.
+## Good to know
 
-## Layout
+- **Talks to the AX control plane directly.** axo manages Gateways, Workspaces, and Tasks through the AX gRPC API, not the `ax` CLI.
+- **Workers still use `ax ssh`.** The API has no exec call, so point `--ax-bin` (or `AX_BIN`) at an `ax` that matches your cluster's version.
+- **Cleans up after itself.** Everything it creates starts with `axo-`, and all of it is deleted when the run ends (or on `ctrl+c`), unless you pass `--keep`.
+- **Never touches what it didn't create.** If a resource with the run's name already exists, axo stops.
+- **The trace viewer is local only.** It's served on `127.0.0.1`, behind a one-time link.
 
-- [main.go](main.go): flags, validation, dry-run, headless mode
-- [orchestrator.go](orchestrator.go): engine (setup, plan, task graph scheduling, retries, review, synthesis)
-- [prompts.go](prompts.go): planner/worker/reviewer/synthesizer prompts and JSON schemas
-- [agy.go](agy.go): plain `agy -p` calls and stream-json parsing
-- [ax.go](ax.go): AX control plane gRPC client and manifests (the Gateway and Workspace are each created at most once)
-- [tui.go](tui.go): Bubble Tea TUI, same styles as `ax-swarm` (`ctrl+t` opens the trace viewer)
-- [trace.go](trace.go), [traceserver.go](traceserver.go), [traceui/](traceui): execution tracer and the live trace viewer
-
-## Testing
+## Develop
 
 ```bash
 cd axo && go test -race ./...
 ```
-
-The tests use an in-memory fake of the AX control plane gRPC client and a fake `agy`. They check that each run creates exactly one Gateway and one Workspace, that all Tasks share them, that dependency reports reach dependent tasks, that `--parallel` is respected, and that retries, skipped dependents, review rounds, headless output, the TUI view, and the "never `/swarm`" rule all behave as described. They also check that existing resources are never adopted, that Workspace setup errors are reported, that specs are decoded strictly, and that cleanup pages through tasks and only touches this run's.
