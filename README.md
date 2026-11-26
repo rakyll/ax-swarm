@@ -9,7 +9,7 @@ axo is a task orchestrator for [AX](https://github.com/google/ax) driven by plai
 ## Quickstart
 
 ```bash
-cd axo && make install
+make install   # installs axo into $(go env GOPATH)/bin
 
 axo --workspace '{"setup":{"git":[{"repo":"https://github.com/chalk/chalk"}]}}' \
   "Why would I use this library, and what are its weak spots?"
@@ -75,5 +75,9 @@ Run `axo --help` for the rest (`--allow-host`, `--atespace`, `--context`, `--ser
 ## Develop
 
 ```bash
-cd axo && go test -race ./...
+go test -race ./...
 ```
+
+## ax-swarm
+
+[`swarm/`](swarm) holds **ax-swarm**, the predecessor: the same AX setup, driven by agy's native `/swarm` mode instead of axo's own orchestration loop. See [swarm/README.md](swarm/README.md).
