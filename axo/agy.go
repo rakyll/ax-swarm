@@ -117,17 +117,24 @@ const (
 
 // AgyEvent is a single parsed event from `agy --output-format stream-json`.
 type AgyEvent struct {
-	Kind         AgyEventKind
-	Model        string
-	Text         string
-	ToolName     string
-	ToolState    string
-	ToolSummary  string
-	ToolOutput   string
-	ToolExitCode int
-	HasExitCode  bool
-	Status       string
-	Response     string
+	Kind AgyEventKind
+	// StepIndex identifies the agy step (tool calls report ACTIVE then DONE
+	// under the same index).
+	StepIndex   int
+	Model       string
+	Text        string
+	ToolName    string
+	ToolState   string
+	ToolSummary string
+	// ToolCommand and ToolOutputFull are the untruncated command line and
+	// output of a run_command call (recorded in traces).
+	ToolCommand    string
+	ToolOutputFull string
+	ToolOutput     string
+	ToolExitCode   int
+	HasExitCode    bool
+	Status         string
+	Response       string
 	// Structured is result.structured_output: the schema-validated JSON
 	// object agy returns when --json-schema is set.
 	Structured string
@@ -178,6 +185,7 @@ type rawAgyEnvelope struct {
 }
 
 type rawAgyStep struct {
+	StepIndex int      `json:"step_index"`
 	State     string   `json:"state"`
 	StepType  string   `json:"step_type"`
 	TextDelta string   `json:"text_delta"`
@@ -278,10 +286,12 @@ func parseStepUpdate(st *rawAgyStep) (AgyEvent, bool) {
 		if toolErr == "" && st.State == "ERROR" {
 			toolErr = "tool call failed"
 		}
-		ev := AgyEvent{Kind: AgyEventTool, ToolName: name, ToolState: st.State, ErrorText: toolErr}
+		ev := AgyEvent{Kind: AgyEventTool, StepIndex: st.StepIndex, ToolName: name, ToolState: st.State, ErrorText: toolErr}
 		if name == "run_command" {
-			ev.ToolSummary = summarizeCommand(paramString(params, "CommandLine"))
+			ev.ToolCommand = paramString(params, "CommandLine")
+			ev.ToolSummary = summarizeCommand(ev.ToolCommand)
 			if st.State == "DONE" {
+				ev.ToolOutputFull = output
 				ev.ToolExitCode, ev.HasExitCode, ev.ToolOutput = parseCommandOutputSummary(output)
 			}
 		} else {

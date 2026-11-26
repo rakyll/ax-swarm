@@ -1,0 +1,40 @@
+# Demo screencast for the axo README. Records a real axo run (one real AX
+# Gateway and Workspace, real AX Tasks driven by plain agy -p workers)
+# against the local AX cluster. Regenerate from the repository root with:
+#
+#   (cd axo && make install) && vhs axo/assets/demo.tape
+#
+# Requires axo, ax, and agy on PATH and a running AX cluster.
+
+Output axo/assets/demo.gif
+
+Require axo
+Require agy
+Require ax
+
+Set Shell "bash"
+Set FontSize 20
+Set Width 1400
+Set Height 820
+Set Padding 20
+Set Theme "Catppuccin Mocha"
+Set TypingSpeed 40ms
+Set Framerate 15
+# A real run takes a few minutes; play it back 8x faster.
+Set PlaybackSpeed 8
+
+# Workers run `ax ssh`; use the ax on PATH, which matches the cluster's AX
+# version, rather than the default $AX_ROOT/bin/ax. The distinctive prompt
+# lets the Wait below detect when axo has exited.
+Hide
+Type "export PATH=$HOME/go/bin:$HOME/.local/bin:$PATH AX_BIN=$(command -v ax) PS1='❯ ' && clear"
+Enter
+Show
+
+Type `axo --name demo "Benchmark slicing, reversed(), and a loop for reversing a string in Python in the workspace. Answer in three short lines."`
+Sleep 500ms
+Enter
+
+# Wait for axo to synthesize the answer, clean up, and return the prompt.
+Wait+Line@20m /^❯\s*$/
+Sleep 4s

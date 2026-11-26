@@ -4,6 +4,8 @@ A custom AX task orchestrator built on plain `agy -p` calls. It does **not** use
 
 Every run creates **exactly one AX `Gateway` and one AX `Workspace`**. Every task runs in its own AX `Task`, and all of those Tasks share that one Workspace and Gateway. Every resource name starts with `axo-`: for run name `<name>`, the Gateway and Workspace are `axo-<name>` and the Tasks are `axo-<name>-<task-id>`.
 
+![axo demo](assets/demo.gif)
+
 ## AX Control Plane API
 
 axo manages AX resources through the **AX control plane API**, the `ax.v1alpha1.AX` gRPC service served by `ax-server`. It uses the public Go client [`github.com/google/ax/client`](https://github.com/google/ax) (pinned to `v0.4.0-rc.2`), not the `ax` CLI:
@@ -48,6 +50,15 @@ flowchart LR
 
 Every agy call passes `--disable-slash-commands`, so the goal text can never trigger `/swarm` or any other agy command. Planner, reviewer, and synthesizer calls get no tool permissions. Workers only get `command(<ax binary>)` (plus any `--allow` rules), through a per-session `--settings` that is never saved.
 
+## Execution Traces
+
+axo records an execution trace of every run: a tree of timed spans covering setup (`CreateGateway`, `CreateWorkspace`, waiting for Ready), planning, each round, each task, every attempt (`CreateTask`, start, the agy worker, `DeleteTask`), every tool call a worker makes (command, exit code, output), reviews, and synthesis. agy prompts and responses, reported task results, and errors are kept as span attributes.
+
+- **Live viewer:** press **`ctrl+t`** in the TUI to open a browser with a live waterfall of the run. It updates as spans start and finish, and you can click a span to see its attributes and events. Press `ctrl+t` again for another window; the viewer stops when axo exits.
+- **Trace file:** `--trace-file trace.json` writes the full trace as JSON when the run ends. This also works headless.
+
+The viewer is served only on `127.0.0.1` with a random port. Each `ctrl+t` mints a one-time login link that is exchanged for an `HttpOnly`, `SameSite=Strict` session cookie. Requests with any other `Host` header (to block DNS rebinding) and anything other than `GET` are refused. The page runs under a strict Content-Security-Policy with no external scripts, and span data is only ever rendered as text.
+
 ## Install
 
 ```bash
@@ -69,7 +80,7 @@ axo --workspace-config workspace.json
 axo --dry-run --workspace-config workspace.json "Audit the middleware"
 ```
 
-The TUI shows the setup steps and then a live table of tasks: orchestrator state, AX Task name, live AX state, and time in the current state. Worker commands print as progress lines above the table. Press `Ctrl+C` once to cancel; workers stop and everything is cleaned up.
+The TUI shows the setup steps and then a live table of tasks: orchestrator state, AX Task name, live AX state, and time in the current state. Worker commands print as progress lines above the table. Press `ctrl+t` for the live trace viewer. Press `ctrl+c` once to cancel; workers stop and everything is cleaned up.
 
 ### Flags
 
@@ -85,6 +96,7 @@ These flags are new:
 | `--max-retries` | `1` | Retries for a failed worker (0–5), each in a fresh AX Task |
 | `--max-tasks` | `16` | Max total tasks across all rounds |
 | `--worker-timeout` | `20m` | Time limit for each agy worker |
+| `--trace-file` | | Write the run's execution trace as JSON to this file on exit |
 
 `--auto-resume` was dropped: the orchestrator always resumes the AX Tasks it creates.
 
@@ -97,7 +109,8 @@ Environment variables are the same as `ax-swarm`: `AX_ROOT`, `AX_BIN`, `AX_TASK_
 - [prompts.go](prompts.go): planner/worker/reviewer/synthesizer prompts and JSON schemas
 - [agy.go](agy.go): plain `agy -p` calls and stream-json parsing
 - [ax.go](ax.go): AX control plane gRPC client and manifests (the Gateway and Workspace are each created at most once)
-- [tui.go](tui.go): Bubble Tea TUI, same styles as `ax-swarm`
+- [tui.go](tui.go): Bubble Tea TUI, same styles as `ax-swarm` (`ctrl+t` opens the trace viewer)
+- [trace.go](trace.go), [traceserver.go](traceserver.go), [traceui/](traceui): execution tracer and the live trace viewer
 
 ## Testing
 

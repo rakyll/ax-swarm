@@ -167,6 +167,7 @@ func BuildWorkerPrompt(cfg Config, axBase string, t WorkerTask, deps []TaskRepor
 	fmt.Fprintf(&b, "%s ssh %s -- sh -lc 'cd /workspace && <command 1> && <command 2>'\n", axBase, t.AXName)
 	b.WriteString("```\n\n")
 	b.WriteString("- Batch related commands into one `ssh` call; every separate shell call costs a full turn.\n")
+	b.WriteString("- Always call `run_command` with `BypassSandbox` set to true for these `ax` commands: they must reach the AX cluster, and the default command sandbox blocks that network access.\n")
 	b.WriteString("- Use only that `ssh` command form. Do not create, resume, suspend, or delete any AX resource; the orchestrator owns the Task, Workspace, and Gateway lifecycle.\n")
 	b.WriteString("- Do not read, build, or modify files on the local host.\n")
 	b.WriteString("- If you change files, capture the change with `git diff` (inside the AX Task) and include it as `patch`.\n")

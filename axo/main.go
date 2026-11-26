@@ -78,7 +78,9 @@ type Config struct {
 	Project                    string
 	DangerouslySkipPermissions bool
 	DryRun                     bool
-	AllowRules                 []string
+	// TraceFile, when set, receives the run's execution trace as JSON.
+	TraceFile  string
+	AllowRules []string
 	// Workspace is the --workspace value: an inline JSON AX Workspace spec.
 	Workspace string
 	// WorkspaceConfig is the --workspace-config value: a path to a JSON file
@@ -286,6 +288,7 @@ Environment:
 	fs.StringVar(&cfg.Project, "project", "", "project ID or name passed to agy --project")
 	fs.BoolVar(&cfg.DangerouslySkipPermissions, "dangerously-skip-permissions", false, "pass --dangerously-skip-permissions to agy workers")
 	fs.BoolVar(&cfg.DryRun, "dry-run", false, "print the Gateway/Workspace manifests, agy command, and planner prompt without creating AX resources or launching agy")
+	fs.StringVar(&cfg.TraceFile, "trace-file", "", "write the run's execution trace (spans) as JSON to this file on exit; press ctrl+t in the TUI for the live trace viewer")
 	fs.Var(&allowRules, "allow", "extra agy permission rule allowed for this run only, e.g. 'mcp(server/*)' (repeatable)")
 
 	if err := fs.Parse(args); err != nil {
@@ -560,10 +563,22 @@ func run(args []string, stdin *os.File, stdout, stderr *os.File) int {
 	defer conn.Close()
 	env := &Env{AX: ax, Name: cfg.Name}
 
+	tracer := NewTracer()
+	starter := defaultOrchStarter(env, tracer)
+	var code int
 	if stdinTTY && stderrTTY {
-		return runTUI(cfg, env, stdin, stdout, stderr, isTerminal(stdout), color, nil)
+		code = runTUI(cfg, env, stdin, stdout, stderr, isTerminal(stdout), color, starter, tracer)
+	} else {
+		code = runHeadless(cfg, env, stdin, stdout, stderr, color, starter)
 	}
-	return runHeadless(cfg, env, stdin, stdout, stderr, color, nil)
+	if cfg.TraceFile != "" {
+		if err := tracer.WriteFile(expandHome(cfg.TraceFile)); err != nil {
+			fmt.Fprintf(stderr, "%s\n", ui.Paint(progName+": "+err.Error(), ansiRed))
+		} else {
+			fmt.Fprintf(stderr, "%s\n", ui.Paint(progName+": wrote execution trace to "+cfg.TraceFile, ansiDim))
+		}
+	}
+	return code
 }
 
 func runDryRun(cfg Config, ui *UI, stdout, stderr io.Writer) int {
@@ -603,7 +618,7 @@ func runDryRun(cfg Config, ui *UI, stdout, stderr io.Writer) int {
 
 func runHeadless(cfg Config, env *Env, stdin io.Reader, stdout, stderr io.Writer, color bool, starter orchStarter) int {
 	if starter == nil {
-		starter = defaultOrchStarter(env)
+		starter = defaultOrchStarter(env, nil)
 	}
 	ui := newUI(stderr, stdin, color, false)
 	if cfg.Goal == "" {

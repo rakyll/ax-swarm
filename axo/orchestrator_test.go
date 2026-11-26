@@ -88,7 +88,8 @@ func (f *fakeAgy) Run(ctx context.Context, args []string, onEvent func(AgyEvent)
 			f.running--
 			f.mu.Unlock()
 		}()
-		onEvent(AgyEvent{Kind: AgyEventTool, ToolName: "run_command", ToolState: "ACTIVE", ToolSummary: "ax ssh x -- ls"})
+		onEvent(AgyEvent{Kind: AgyEventTool, StepIndex: 3, ToolName: "run_command", ToolState: "ACTIVE", ToolSummary: "ax ssh x -- ls", ToolCommand: "ax ssh x -- ls"})
+		onEvent(AgyEvent{Kind: AgyEventTool, StepIndex: 3, ToolName: "run_command", ToolState: "DONE", ToolSummary: "ax ssh x -- ls", ToolCommand: "ax ssh x -- ls", HasExitCode: true, ToolOutputFull: "Command exited with code 0."})
 		select {
 		case <-time.After(20 * time.Millisecond):
 		case <-ctx.Done():

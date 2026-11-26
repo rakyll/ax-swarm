@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>axo trace</title>
+  <link rel="stylesheet" href="app.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header>
+    <span class="badge">axo</span>
+    <span id="run-name" class="run-name">connecting…</span>
+    <span id="run-status" class="pill">…</span>
+    <span id="run-elapsed" class="muted"></span>
+    <span id="run-tasks" class="muted"></span>
+    <span class="spacer"></span>
+    <label class="toggle"><input type="checkbox" id="show-tools" checked> tool calls</label>
+    <label class="toggle"><input type="checkbox" id="follow" checked> follow</label>
+    <span id="conn" class="conn">●</span>
+  </header>
+  <main>
+    <section class="waterfall">
+      <div class="axis-row">
+        <div class="name-col muted">span</div>
+        <div class="track" id="axis"></div>
+      </div>
+      <div id="rows"></div>
+    </section>
+    <aside id="details" class="details">
+      <p class="muted">Select a span to see its attributes and events.</p>
+    </aside>
+  </main>
+  <footer class="legend" id="legend"></footer>
+</body>
+</html>

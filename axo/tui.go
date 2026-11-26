@@ -111,6 +111,10 @@ type tuiModel struct {
 	styles  tuiStyles
 	starter orchStarter
 
+	// tracer collects the run's spans; ctrl+t serves them live in a browser.
+	tracer   *Tracer
+	traceSrv *TraceServer
+
 	stage    tuiStage
 	steps    []stepEntry
 	spinner  spinner.Model
@@ -144,7 +148,7 @@ type tuiModel struct {
 
 func newTUIModel(cfg Config, env *Env, styles tuiStyles, starter orchStarter) tuiModel {
 	if starter == nil {
-		starter = defaultOrchStarter(env)
+		starter = defaultOrchStarter(env, nil)
 	}
 	sp := spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(styles.spinner))
 	ti := textinput.New()
@@ -251,7 +255,15 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.inputErr = ""
 			}
 			return m, cmd
-		case stageSetup, stageRunning:
+		case stageSetup, stageRunning, stageCleanup:
+			if msg.Type == tea.KeyCtrlT {
+				// Call first: openTraceViewer stores the server on m.
+				cmd := m.openTraceViewer()
+				return m, cmd
+			}
+			if m.stage == stageCleanup {
+				return m, nil
+			}
 			if msg.Type == tea.KeyCtrlC || (m.stage == stageSetup && msg.String() == "q") {
 				if m.cancelled {
 					return m, tea.Quit
@@ -473,7 +485,7 @@ func (m tuiModel) View() string {
 			label = "Canceling setup..."
 		}
 		b.WriteString(fmt.Sprintf("  %s %s\n", m.spinner.View(), m.styles.active.Render(label)))
-		b.WriteString("\n  " + m.styles.subtle.Render("ctrl+c cancel") + "\n")
+		b.WriteString("\n  " + m.styles.subtle.Render(m.keyHint()) + "\n")
 	case stageCleanup:
 		b.WriteString(fmt.Sprintf("  %s %s\n", m.spinner.View(), m.styles.active.Render(fmt.Sprintf("Cleaning up AX resources (%s*)...", m.cfg.Name))))
 	case stageDone:
@@ -668,7 +680,7 @@ func (m tuiModel) renderRunningStatusLine() string {
 		parts = append(parts, m.status)
 	}
 	parts = append(parts, m.styles.subtle.Render(formatElapsed(time.Since(m.runStart))))
-	return strings.Join(parts, m.styles.subtle.Render(" · ")) + m.styles.subtle.Render("  (ctrl+c cancel)")
+	return strings.Join(parts, m.styles.subtle.Render(" · ")) + m.styles.subtle.Render("  ("+m.keyHint()+")")
 }
 
 func (m tuiModel) completionLine() string {
@@ -689,6 +701,34 @@ func (m tuiModel) completionLine() string {
 		return m.styles.okIcon.Render("✓") + " axo finished in " + elapsed +
 			m.styles.subtle.Render(fmt.Sprintf(" (%d/%d tasks done)", done, total))
 	}
+}
+
+func (m tuiModel) keyHint() string {
+	if m.tracer != nil {
+		return "ctrl+t trace · ctrl+c cancel"
+	}
+	return "ctrl+c cancel"
+}
+
+// openTraceViewer starts the trace server on first use and opens a fresh
+// one-time login link in the browser. It mutates m (the server is kept on the
+// model Bubble Tea retains) and returns a command that prints the outcome.
+func (m *tuiModel) openTraceViewer() tea.Cmd {
+	if m.tracer == nil {
+		return m.println(m.styles.warnIcon.Render("!") + " tracing is not enabled")
+	}
+	if m.traceSrv == nil {
+		srv, err := StartTraceServer(m.tracer)
+		if err != nil {
+			return m.println(m.styles.errIcon.Render("✗") + " could not start the trace viewer: " + err.Error())
+		}
+		m.traceSrv = srv
+	}
+	url, err := m.traceSrv.Open()
+	if err != nil {
+		return m.println(fmt.Sprintf("%s could not open a browser (%v); open %s", m.styles.warnIcon.Render("!"), err, url))
+	}
+	return m.println(fmt.Sprintf("%s live trace viewer opened at %s", m.styles.runName.Render("◆"), m.styles.subtle.Render("http://"+m.traceSrv.host+"/")))
 }
 
 // println prints a line above the live view, wrapped to the terminal width so
@@ -716,9 +756,10 @@ func (m tuiModel) renderError(msg string, indent int) string {
 	return body
 }
 
-func runTUI(cfg Config, env *Env, stdin io.Reader, stdout, stderr io.Writer, stdoutTTY, colorEnabled bool, starter orchStarter) int {
+func runTUI(cfg Config, env *Env, stdin io.Reader, stdout, stderr io.Writer, stdoutTTY, colorEnabled bool, starter orchStarter, tracer *Tracer) int {
 	styles := newTUIStyles(stderr, cfg.Color, colorEnabled)
 	model := newTUIModel(cfg, env, styles, starter)
+	model.tracer = tracer
 	defer model.cancel()
 
 	p := tea.NewProgram(model, tea.WithInput(stdin), tea.WithOutput(stderr))
@@ -734,6 +775,9 @@ func runTUI(cfg Config, env *Env, stdin io.Reader, stdout, stderr io.Writer, std
 	if ok {
 		final.cancel()
 		drainEvents(final.events, 15*time.Second)
+		if final.traceSrv != nil {
+			_ = final.traceSrv.Close()
+		}
 	}
 	if (!ok || !final.cleanupRan) && !cfg.Keep && env.created() {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
