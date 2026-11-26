@@ -212,9 +212,14 @@ pre.block {
 .node .t-row.st-running { fill: var(--phase); }
 .node .t-row.st-warn { fill: var(--warn); }
 .node .t-more { font-size: 11px; fill: var(--muted); }
-.node .t-hit { fill: transparent; cursor: pointer; }
-.node .t-hit:hover { fill: rgba(137, 180, 250, 0.10); }
-.node .sep { stroke: var(--line); }
+.node .rail { stroke: var(--line); stroke-width: 1.5; }
+.tbox { cursor: pointer; }
+.tbox .tbox-rect { fill: var(--panel); stroke: var(--line); stroke-width: 1.2; }
+.tbox:hover .tbox-rect { stroke: var(--muted); fill: #1f1f30; }
+.tbox.st-running .tbox-rect { stroke: var(--phase); animation: pulse 1.4s ease-in-out infinite; }
+.tbox.st-ok .tbox-rect { stroke: rgba(166, 227, 161, 0.55); }
+.tbox.st-error .tbox-rect { stroke: var(--error); }
+.tbox.st-warn .tbox-rect { stroke: var(--warn); }
 .fill-ax { fill: var(--ax); }
 
 .event.s-info { color: var(--text); }

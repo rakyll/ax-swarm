@@ -238,8 +238,9 @@ function reviewSummary(s) {
 
 const NODE_W = 230;
 const NODE_H = 66;
-const TOOL_ROW_H = 16;
-const MAX_TOOL_ROWS = 6;
+const TOOL_BOX_H = 24; // every tool call is its own box, stacked under its task
+const TOOL_GAP = 6;
+const TOOL_INDENT = 16;
 const COL_GAP = 56;
 const ROW_GAP = 18;
 const MIN_SCALE = 0.7; // shrink wide graphs to fit, but keep text readable
@@ -279,9 +280,7 @@ function rowLabel(rs) {
 }
 
 function nodeHeight(n) {
-  const k = rowSpans(n).length;
-  if (!k) return NODE_H;
-  return NODE_H + 8 + Math.min(k, MAX_TOOL_ROWS) * TOOL_ROW_H + (k > MAX_TOOL_ROWS ? TOOL_ROW_H : 0);
+  return NODE_H + rowSpans(n).length * (TOOL_BOX_H + TOOL_GAP);
 }
 
 function layout(g) {
@@ -368,8 +367,8 @@ function renderOverview() {
       class: `node st-${n.status}${n.key === selectedNode ? ' selected' : ''}`,
       transform: `translate(${p.x},${p.y})`,
     });
-    grp.appendChild(svg('rect', { class: 'box', width: NODE_W, height: p.h, rx: 8 }));
-    grp.appendChild(svg('rect', { class: 'stripe fill-' + n.kind, x: 0, y: 0, width: 5, height: p.h, rx: 2 }));
+    grp.appendChild(svg('rect', { class: 'box', width: NODE_W, height: NODE_H, rx: 8 }));
+    grp.appendChild(svg('rect', { class: 'stripe fill-' + n.kind, x: 0, y: 0, width: 5, height: NODE_H, rx: 2 }));
     grp.appendChild(svg('text', { class: 'n-label', x: 16, y: 21 }, clipText(n.label, 26)));
     grp.appendChild(svg('text', { class: 'n-sub', x: 16, y: 39 }, clipText(n.sub, 30)));
     grp.appendChild(svg('text', { class: 'n-meta st-' + n.status, x: 16, y: 56 }, nodeMeta(n)));
@@ -384,33 +383,31 @@ function renderOverview() {
 
 const TOOL_ICONS = { ok: '✓', error: '✗', running: '▸', warn: '!' };
 
-// drawRows lists a node's row spans inside it: a task's tool calls (ssh,
-// read_file, write_file), most recent last, or the setup steps. Clicking a
-// row opens it in the inspector.
+// drawRows draws a box for each of a node's row spans, stacked under it: a
+// task's tool calls (ssh, read_file, write_file) in start order, or the setup
+// steps. A rail on the left ties the boxes to their node. Clicking a box opens
+// it in the inspector.
 function drawRows(grp, n) {
-  const tools = rowSpans(n);
-  if (!tools.length) return;
-  grp.appendChild(svg('line', { class: 'sep', x1: 12, y1: NODE_H, x2: NODE_W - 10, y2: NODE_H }));
-  const shown = tools.slice(-MAX_TOOL_ROWS);
-  let y = NODE_H + 6;
-  if (tools.length > MAX_TOOL_ROWS) {
-    grp.appendChild(svg('text', { class: 't-more', x: 16, y: y + 11 }, '+' + (tools.length - MAX_TOOL_ROWS) + ' earlier tool calls'));
-    y += TOOL_ROW_H;
-  }
-  for (const ts of shown) {
-    const cmd = attr(ts, 'command') || attr(ts, 'path') || ts.name;
-    const dur = ts.end ? fmtDur(endOf(ts) - t(ts.start)) : '';
-    const label = `${TOOL_ICONS[ts.status] || '·'} ${clipText(rowLabel(ts), 27)}`;
-    const hit = svg('rect', { class: 't-hit', x: 6, y: y, width: NODE_W - 12, height: TOOL_ROW_H, rx: 3 });
-    const text = svg('text', { class: 't-row st-' + ts.status, x: 16, y: y + 12 }, label);
-    const durText = svg('text', { class: 't-more', x: NODE_W - 12, y: y + 12, 'text-anchor': 'end' }, dur);
-    const tip = svg('title', {}, cmd);
-    hit.appendChild(tip);
-    hit.addEventListener('click', (ev) => { ev.stopPropagation(); openToolInInspector(n.key, ts.id); });
-    grp.appendChild(hit);
-    grp.appendChild(text);
-    grp.appendChild(durText);
-    y += TOOL_ROW_H;
+  const rows = rowSpans(n);
+  if (!rows.length) return;
+  const railX = TOOL_INDENT / 2;
+  const lastMid = NODE_H + rows.length * (TOOL_BOX_H + TOOL_GAP) - TOOL_BOX_H / 2;
+  grp.appendChild(svg('line', { class: 'rail', x1: railX, y1: NODE_H, x2: railX, y2: lastMid }));
+  let y = NODE_H + TOOL_GAP;
+  const w = NODE_W - TOOL_INDENT;
+  for (const rs of rows) {
+    const cmd = attr(rs, 'command') || attr(rs, 'path') || rs.name;
+    const dur = rs.end ? fmtDur(endOf(rs) - t(rs.start)) : '';
+    const box = svg('g', { class: 'tbox st-' + rs.status, transform: `translate(${TOOL_INDENT},${y})` });
+    box.appendChild(svg('line', { class: 'rail', x1: railX - TOOL_INDENT, y1: TOOL_BOX_H / 2, x2: 0, y2: TOOL_BOX_H / 2 }));
+    box.appendChild(svg('rect', { class: 'tbox-rect', width: w, height: TOOL_BOX_H, rx: 5 }));
+    box.appendChild(svg('text', { class: 't-row st-' + rs.status, x: 8, y: 16 },
+      `${TOOL_ICONS[rs.status] || '·'} ${clipText(rowLabel(rs), dur ? 22 : 30)}`));
+    box.appendChild(svg('text', { class: 't-more', x: w - 7, y: 16, 'text-anchor': 'end' }, dur));
+    box.appendChild(svg('title', {}, cmd));
+    box.addEventListener('click', (ev) => { ev.stopPropagation(); openToolInInspector(n.key, rs.id); });
+    grp.appendChild(box);
+    y += TOOL_BOX_H + TOOL_GAP;
   }
 }
 
